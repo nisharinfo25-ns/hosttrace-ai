@@ -5,8 +5,11 @@ Flask Backend API  v2.5 — SOC-Grade Intelligence Engine
 
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-import socket, time, re, ipaddress
+import socket, time, re, ipaddress, sys
 from datetime import datetime
+
+# Set global timeout for socket operations (DNS, WHOIS)
+socket.setdefaulttimeout(15)
 
 try:
     import whois
@@ -141,6 +144,20 @@ def get_dns_info(domain: str) -> dict:
 # ══════════════════════════════════════════════════════════════
 # 2. WHOIS LOOKUP
 # ══════════════════════════════════════════════════════════════
+def safe_date_parse(d):
+    try:
+        if not d: return "Unknown"
+        if isinstance(d, list): d = d[0]
+        if isinstance(d, datetime):
+            return d.strftime("%Y-%m-%d")
+        if isinstance(d, str):
+            # Try to catch YYYY-MM-DD or similar
+            match = re.search(r"(\d{4}-\d{2}-\d{2})", d)
+            if match: return match.group(1)
+        return str(d)
+    except Exception:
+        return "Unknown"
+
 def get_whois_info(domain: str) -> dict:
     info = {
         "registrar":"Unknown","creation_date":"Unknown","expiry_date":"Unknown",
@@ -160,11 +177,11 @@ def get_whois_info(domain: str) -> dict:
         info["org"]       = str(w.org)       if w.org       else "Unknown"
         info["country"]   = str(w.country)   if w.country   else "Unknown"
         cd = w.creation_date
-        if isinstance(cd, list): cd = cd[0]
-        info["creation_date"] = cd.strftime("%Y-%m-%d") if cd else "Unknown"
+        info["creation_date"] = safe_date_parse(cd)
+        
         ed = w.expiration_date
-        if isinstance(ed, list): ed = ed[0]
-        info["expiry_date"] = ed.strftime("%Y-%m-%d") if ed else "Unknown"
+        info["expiry_date"] = safe_date_parse(ed)
+        
         ns = w.name_servers
         if ns:
             info["name_servers"] = [n.lower() for n in ns][:6]
@@ -655,16 +672,31 @@ def analyze():
     if not domain or len(domain) < 3:
         return jsonify({"error":"Please provide a valid domain name"}),400
 
+    print(f"[*] Starting analysis for: {domain}")
     # ── Pipeline ──
+    print(f"  [1/8] DNS check...")
     dns_info   = get_dns_info(domain)
+    
+    print(f"  [2/8] WHOIS check...")
     whois_info = get_whois_info(domain)
+    
+    print(f"  [3/8] Proxy detection...")
     proxy_info = detect_proxy(dns_info, whois_info)
+    
+    print(f"  [4/8] Hosting prediction...")
     hosting    = predict_hosting(dns_info, whois_info, proxy_info)
+    
+    print(f"  [5/8] Threat intel check...")
     threat     = get_threat_intel(domain)
+    
+    print(f"  [6/8] Risk calculation...")
     risk       = calculate_risk(proxy_info, whois_info, dns_info, hosting, threat, domain)
+    
+    print(f"  [7/8] IP history build...")
     ip_history = build_ip_history(dns_info["ip_addresses"], domain)
 
     # ── New intelligence modules ──
+    print(f"  [8/8] Generating advanced report modules...")
     conf_breakdown  = build_confidence_breakdown(dns_info, whois_info, proxy_info, hosting, domain)
     candidates      = build_hosting_candidates(hosting, proxy_info)
     attr_diff       = attribution_difficulty(proxy_info, whois_info, dns_info)

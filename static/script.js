@@ -127,25 +127,63 @@ async function startAnalysis() {
   if (!domain) { shakeInput(); return; }
 
   showScanner();
-  runScanAnimation(async () => {
-    try {
-      const resp = await fetch(`${API_BASE}/analyze`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ domain }),
-      });
-      const data = await resp.json();
-      if (data.error) {
-        hideScanner();
-        showError(data.error);
-        return;
+  
+  // Create AbortController for fetch timeout
+  const controller = new AbortController();
+  const timeoutId  = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+  let apiResp = null;
+  let apiErr  = null;
+
+  // Start API call in parallel with animation initialization
+  const apiCall = fetch(`${API_BASE}/analyze`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ domain }),
+    signal:  controller.signal,
+  })
+  .then(async r => {
+    clearTimeout(timeoutId);
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`Server ${r.status}: ${text.slice(0,50)}`);
+    }
+    return r.json();
+  })
+  .catch(err => {
+    clearTimeout(timeoutId);
+    apiErr = err;
+    return null;
+  });
+
+  runScanAnimation(async (currentStep, totalSteps) => {
+    // If we've reached the penultimate step, wait for API
+    if (currentStep === totalSteps - 1) {
+      apiResp = await apiCall;
+      
+      if (apiErr) {
+        logToScanner(`[FATAL] ERROR: ${apiErr.message.includes('Failed to fetch') ? 'BACKEND OFFLINE' : apiErr.message.toUpperCase()}`, 'danger');
+        if (apiErr.message.includes('Failed to fetch')) {
+          logToScanner(`> Ensure app.py is running on port 5000`, 'warn');
+        }
+        document.getElementById('scannerTitle').textContent = 'SYSTEM FAILURE';
+        document.getElementById('scannerTitle').style.color = '#ff4f6d';
+        return false; // Stop animation
       }
-      currentReport = data;
+      
+      if (apiResp && apiResp.error) {
+        logToScanner(`[ERROR] ${apiResp.error.toUpperCase()}`, 'danger');
+        document.getElementById('scannerTitle').textContent = 'SCAN HALTED';
+        return false;
+      }
+    }
+    return true; // Continue animation
+  }, (data) => {
+    // Final completion callback
+    if (apiResp) {
+      currentReport = apiResp;
       hideScanner();
-      renderResults(data);
-    } catch (err) {
-      hideScanner();
-      showError('Network error: ' + err.message);
+      renderResults(apiResp);
     }
   });
 }
@@ -165,12 +203,12 @@ function hideScanner() {
   document.getElementById('scannerOverlay').classList.add('hidden');
 }
 
-function runScanAnimation(onComplete) {
+function runScanAnimation(onStep, onComplete) {
   const bar    = document.getElementById('scanBar');
   const pctEl  = document.getElementById('scanPercent');
   const logEl  = document.getElementById('scannerLog');
   const titleEl= document.getElementById('scannerTitle');
-  let step = 0;
+  let stepIdx = 0;
 
   const TITLES = [
     'INITIALIZING', 'DNS LOOKUP', 'WHOIS QUERY',
@@ -178,23 +216,37 @@ function runScanAnimation(onComplete) {
     'THREAT INTEL', 'RISK SCORING', 'FINALIZING', 'COMPLETE'
   ];
 
-  const tick = setInterval(() => {
-    if (step >= SCAN_STEPS.length) {
+  const tick = setInterval(async () => {
+    if (stepIdx >= SCAN_STEPS.length) {
       clearInterval(tick);
-      setTimeout(onComplete, 300);
+      onComplete();
       return;
     }
-    const s = SCAN_STEPS[step];
+
+    // Call step hook (can halt animation)
+    const proceed = await onStep(stepIdx, SCAN_STEPS.length);
+    if (!proceed) {
+      clearInterval(tick);
+      return;
+    }
+
+    const s = SCAN_STEPS[stepIdx];
     bar.style.width     = s.pct + '%';
     pctEl.textContent   = s.pct + '%';
-    titleEl.textContent = TITLES[step] || 'SCANNING';
-    const line = document.createElement('div');
-    line.textContent   = s.msg;
-    line.className     = `term-line ${s.cls}`;
-    logEl.appendChild(line);
-    logEl.scrollTop    = logEl.scrollHeight;
-    step++;
+    titleEl.textContent = TITLES[stepIdx] || 'SCANNING';
+    
+    logToScanner(s.msg, s.cls);
+    stepIdx++;
   }, 320);
+}
+
+function logToScanner(msg, cls) {
+  const logEl = document.getElementById('scannerLog');
+  const line = document.createElement('div');
+  line.textContent = msg;
+  line.className   = `term-line ${cls}`;
+  logEl.appendChild(line);
+  logEl.scrollTop  = logEl.scrollHeight;
 }
 
 /* ════════════════════════════════════════════
