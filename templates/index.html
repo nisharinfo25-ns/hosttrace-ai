@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HostTrace AI – Proxy Breaker | Cyber Intelligence Platform</title>
-  <meta name="description" content="HostTrace AI reveals the real hosting infrastructure behind proxy-protected domains using OSINT, DNS analysis, and AI prediction." />
+  <meta name="description" content="HostTrace AI reveals the real hosting infrastructure behind proxy-protected domains using OSINT, DNS analysis, SSL inspection, and AI prediction." />
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap" rel="stylesheet" />
   <!-- jsPDF for PDF generation -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="../static/style.css" />
+  <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
 
@@ -27,9 +27,10 @@
       <span class="logo-tag">PROXY BREAKER</span>
     </div>
     <nav class="header-nav">
-      <span class="nav-badge">v2.4.1</span>
+      <span class="nav-badge">v3.0</span>
       <span class="nav-badge pulse-dot">LIVE</span>
       <span class="nav-badge">OSINT ENGINE</span>
+      <span class="nav-badge" id="healthBadge">CHECKING…</span>
     </nav>
   </div>
 </header>
@@ -39,7 +40,7 @@
   <div class="hero-inner">
     <div class="hero-badge">🛡 CYBER INTELLIGENCE PLATFORM</div>
     <h1 class="hero-title">Unmask the Real Host<br/><span class="gradient-text">Behind Any Proxy</span></h1>
-    <p class="hero-sub">Powered by OSINT + AI • DNS Analysis • WHOIS Forensics • Threat Intelligence</p>
+    <p class="hero-sub">Powered by OSINT + AI • DNS • WHOIS • SSL Analysis • Threat Intelligence • GeoIP</p>
 
     <!-- Search Box -->
     <div class="search-box" id="searchBox">
@@ -74,8 +75,35 @@
   </div>
 </div>
 
+<!-- ══════════════ FATAL ERROR OVERLAY ══════════════ -->
+<div id="fatalErrorOverlay" class="fatal-error-overlay hidden">
+  <div class="fatal-card">
+    <div class="fatal-icon">💀</div>
+    <div class="fatal-title">FATAL ERROR: BACKEND OFFLINE</div>
+    <div class="fatal-msg" id="fatalMsg">Could not connect to the analysis engine.</div>
+    <div class="fatal-hint">Ensure <code>app.py</code> is running on port 5000</div>
+    <button class="fatal-close-btn" onclick="closeFatalError()">DISMISS</button>
+  </div>
+</div>
+
 <!-- ══════════════ RESULTS SECTION ══════════════ -->
 <main class="results-section hidden" id="resultsSection">
+
+  <!-- ── Trace ID + Verdict Bar ── -->
+  <div class="verdict-bar" id="verdictBar">
+    <div class="verdict-left">
+      <span class="trace-label">TRACE ID:</span>
+      <span class="trace-id" id="traceId">—</span>
+      <span class="report-id-badge" id="reportIdBadge">—</span>
+    </div>
+    <div class="verdict-center">
+      <span class="verdict-status-badge" id="verdictBadge">—</span>
+      <span class="verdict-confidence" id="verdictConf">Confidence: —</span>
+    </div>
+    <div class="verdict-right">
+      <span class="scan-ts" id="scanTs">—</span>
+    </div>
+  </div>
 
   <!-- ── Top summary row ── -->
   <div class="summary-row" id="summaryRow">
@@ -89,7 +117,7 @@
     <!-- Proxy Status -->
     <div class="summary-card" id="proxyCard">
       <div class="card-icon" id="proxyIcon">🔒</div>
-      <div class="card-label">PROXY STATUS</div>
+      <div class="card-label">PROXY / CDN STATUS</div>
       <div class="card-value" id="resProxy">—</div>
       <div class="card-sub" id="resProxyProvider">—</div>
     </div>
@@ -98,6 +126,7 @@
       <div class="card-icon">🏠</div>
       <div class="card-label">REAL HOSTING</div>
       <div class="card-value accent-green" id="resHosting">—</div>
+      <div class="card-sub" id="resPossibleHosting" style="margin-top:2px;"></div>
       <div class="card-sub" id="resConfidence">Confidence: —</div>
     </div>
     <!-- Risk -->
@@ -120,7 +149,7 @@
         <div class="panel-header"><span class="panel-icon">📡</span> AI PREDICTION METER</div>
         <div class="panel-body">
           <div class="conf-label">
-            <span>Hosting Provider:</span>
+            <span>Provider:</span>
             <span class="conf-provider" id="confProvider">—</span>
           </div>
           <div class="meter-wrap">
@@ -142,7 +171,17 @@
         <div class="panel-header"><span class="panel-icon">🎯</span> RISK ASSESSMENT</div>
         <div class="panel-body">
           <canvas id="riskGauge" height="160"></canvas>
+          <!-- Risk score breakdown -->
+          <div class="risk-breakdown-grid" id="riskBreakdownGrid"></div>
           <div class="risk-factors" id="riskFactors"></div>
+        </div>
+      </div>
+
+      <!-- Attack Surface Summary -->
+      <div class="panel" id="panelAttackSurface">
+        <div class="panel-header"><span class="panel-icon">🗡</span> ATTACK SURFACE</div>
+        <div class="panel-body">
+          <div class="atk-surface-grid" id="atkSurfaceGrid"></div>
         </div>
       </div>
 
@@ -168,6 +207,14 @@
         </div>
       </div>
 
+      <!-- SSL / HTTP Analysis -->
+      <div class="panel" id="panelSslHttp">
+        <div class="panel-header"><span class="panel-icon">🔐</span> SSL / HTTP SECURITY</div>
+        <div class="panel-body">
+          <div class="ssl-http-grid" id="sslHttpGrid"></div>
+        </div>
+      </div>
+
     </div>
 
     <!-- RIGHT COLUMN -->
@@ -178,6 +225,22 @@
         <div class="panel-header"><span class="panel-icon">📋</span> WHOIS FORENSICS</div>
         <div class="panel-body">
           <table class="info-table" id="whoisTable"></table>
+        </div>
+      </div>
+
+      <!-- GeoIP Panel -->
+      <div class="panel" id="panelGeo">
+        <div class="panel-header"><span class="panel-icon">🌍</span> GEO-IP ANALYSIS</div>
+        <div class="panel-body">
+          <div class="geo-info" id="geoInfo"></div>
+        </div>
+      </div>
+
+      <!-- URL Pattern Panel -->
+      <div class="panel" id="panelUrl">
+        <div class="panel-header"><span class="panel-icon">🔗</span> URL PATTERN ANALYSIS</div>
+        <div class="panel-body">
+          <div class="url-info" id="urlInfo"></div>
         </div>
       </div>
 
@@ -205,7 +268,7 @@
       <div class="panel report-panel" id="panelReport">
         <div class="panel-header"><span class="panel-icon">📄</span> GENERATE REPORT</div>
         <div class="panel-body report-body">
-          <p class="report-desc">Export a full forensic PDF report including all findings, risk scores, and AI predictions.</p>
+          <p class="report-desc">Export a full forensic PDF report including all findings, risk scores, SSL analysis, attack surface summary, and AI predictions.</p>
           <button class="report-btn" onclick="downloadReport()">
             <span>⬇ DOWNLOAD PDF REPORT</span>
             <span class="btn-glow"></span>
@@ -223,12 +286,12 @@
   <div class="footer-inner">
     <span>HostTrace AI © 2025 — Cyber Intelligence Platform</span>
     <span class="footer-sep">|</span>
-    <span>OSINT • DNS • WHOIS • AI</span>
+    <span>OSINT • DNS • WHOIS • SSL • GeoIP • AI</span>
     <span class="footer-sep">|</span>
     <span>For authorized security research only</span>
   </div>
 </footer>
 
-<script src="../static/script.js"></script>
+<script src="/static/script.js"></script>
 </body>
 </html>
