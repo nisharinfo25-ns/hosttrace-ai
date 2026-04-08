@@ -53,7 +53,8 @@ let currentReport = null;
 let riskChart = null;
 let ipChart = null;
 
-const API_BASE = window.location.port === '5000' ? '' : 'http://127.0.0.1:5000';
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_BASE = isLocal && window.location.port !== '5000' && window.location.port !== '' ? 'http://127.0.0.1:5000' : '';
 
 /* ════════════════════════════════════════════
    HEALTH CHECK
