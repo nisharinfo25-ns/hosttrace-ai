@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HostTrace AI – Proxy Breaker | Cyber Intelligence Platform</title>
-  <meta name="description" content="HostTrace AI reveals the real hosting infrastructure behind proxy-protected domains using OSINT, DNS analysis, SSL inspection, and AI prediction." />
+  <title>HostTrace AI – Smart URL Risk Analyzer | Cyber Intelligence Platform</title>
+  <meta name="description" content="HostTrace AI v4.0 — Reveal hidden hosting infrastructure behind Cloudflare proxies. Advanced OSINT, origin discovery, ASN mismatch, redirect chain analysis, and AI-driven risk scoring." />
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap" rel="stylesheet" />
-  <!-- jsPDF for PDF generation -->
+  <!-- jsPDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -24,10 +24,10 @@
     <div class="logo">
       <span class="logo-icon">⬡</span>
       <span class="logo-text">HostTrace<span class="accent"> AI</span></span>
-      <span class="logo-tag">PROXY BREAKER</span>
+      <span class="logo-tag">SMART RISK ANALYZER</span>
     </div>
     <nav class="header-nav">
-      <span class="nav-badge">v3.0</span>
+      <span class="nav-badge">v4.0</span>
       <span class="nav-badge pulse-dot">LIVE</span>
       <span class="nav-badge">OSINT ENGINE</span>
       <span class="nav-badge" id="healthBadge">CHECKING…</span>
@@ -38,9 +38,9 @@
 <!-- ══════════════ HERO ══════════════ -->
 <section class="hero">
   <div class="hero-inner">
-    <div class="hero-badge">🛡 CYBER INTELLIGENCE PLATFORM</div>
-    <h1 class="hero-title">Unmask the Real Host<br/><span class="gradient-text">Behind Any Proxy</span></h1>
-    <p class="hero-sub">Powered by OSINT + AI • DNS • WHOIS • SSL Analysis • Threat Intelligence • GeoIP</p>
+    <div class="hero-badge">🛡 CYBER INTELLIGENCE PLATFORM v4.0</div>
+    <h1 class="hero-title">Unmask Hidden Infrastructure<br/><span class="gradient-text">Behind Any Proxy</span></h1>
+    <p class="hero-sub">Origin Discovery • ASN Analysis • Redirect Chain • OSINT • AI Confidence • GeoIP • Risk Engine v4.0</p>
 
     <!-- Search Box -->
     <div class="search-box" id="searchBox">
@@ -49,12 +49,12 @@
         type="text"
         id="domainInput"
         class="search-input"
-        placeholder="Enter domain (e.g. example.com)"
+        placeholder="Enter domain to investigate (e.g. suspicious-site.xyz)"
         autocomplete="off"
         spellcheck="false"
       />
       <button id="analyzeBtn" class="analyze-btn" onclick="startAnalysis()">
-        <span id="btnText">ANALYZE</span>
+        <span id="btnText">INVESTIGATE</span>
         <span class="btn-glow"></span>
       </button>
     </div>
@@ -105,48 +105,117 @@
     </div>
   </div>
 
-  <!-- ── Top summary row ── -->
+  <!-- ── Top Summary Cards ── -->
   <div class="summary-row" id="summaryRow">
-    <!-- Domain Card -->
     <div class="summary-card" id="domainCard">
       <div class="card-icon">🌐</div>
       <div class="card-label">TARGET DOMAIN</div>
       <div class="card-value" id="resDomain">—</div>
       <div class="card-sub" id="resIPs">Resolving…</div>
     </div>
-    <!-- Proxy Status -->
     <div class="summary-card" id="proxyCard">
       <div class="card-icon" id="proxyIcon">🔒</div>
       <div class="card-label">PROXY / CDN STATUS</div>
       <div class="card-value" id="resProxy">—</div>
       <div class="card-sub" id="resProxyProvider">—</div>
     </div>
-    <!-- Real Hosting -->
     <div class="summary-card glow-card" id="hostCard">
       <div class="card-icon">🏠</div>
       <div class="card-label">REAL HOSTING</div>
       <div class="card-value accent-green" id="resHosting">—</div>
-      <div class="card-sub" id="resPossibleHosting" style="margin-top:2px;"></div>
+      <div class="card-sub" id="resPossibleHosting"></div>
       <div class="card-sub" id="resConfidence">Confidence: —</div>
     </div>
-    <!-- Risk -->
     <div class="summary-card" id="riskCard">
       <div class="card-icon">⚠</div>
       <div class="card-label">RISK LEVEL</div>
       <div class="card-value" id="resRiskLevel">—</div>
       <div class="card-sub" id="resRiskScore">Score: —</div>
     </div>
+    <!-- AI Confidence summary card (new) -->
+    <div class="summary-card ai-card" id="aiCard">
+      <div class="card-icon">🧠</div>
+      <div class="card-label">AI CONFIDENCE</div>
+      <div class="card-value accent-purple" id="resAiConf">—</div>
+      <div class="card-sub" id="resInfraPattern">—</div>
+    </div>
   </div>
 
-  <!-- ── Main grid ── -->
+  <!-- ══════ ROW 1: INFRASTRUCTURE MAP (full width) ══════ -->
+  <div class="full-width-panel" id="panelInfraMap">
+    <div class="panel-header"><span class="panel-icon">🗺</span> VISUAL INFRASTRUCTURE MAP — Origin Path Discovery</div>
+    <div class="panel-body">
+      <div class="infra-map-container" id="infraMapContainer"></div>
+    </div>
+  </div>
+
+  <!-- ══════ ROW 2: "WHY RISKY?" (full width) ══════ -->
+  <div class="full-width-panel why-risky-panel" id="panelWhyRisky">
+    <div class="panel-header"><span class="panel-icon">❗</span> WHY IS THIS SITE RISKY? — Explainable Analysis</div>
+    <div class="panel-body">
+      <div class="why-risky-grid" id="whyRiskyGrid"></div>
+    </div>
+  </div>
+
+  <!-- ══════ ROW 3: AI INTELLIGENCE DASHBOARD (NEW) ══════ -->
+  <div class="full-width-panel dashboard-panel" id="panelDashboard">
+    <div class="panel-header"><span class="panel-icon">📊</span> LIVE THREAT DASHBOARD — v7.0 Self-Learning AI</div>
+    <div class="panel-body">
+      <div class="dashboard-grid">
+        <div class="dash-chart">
+          <div class="dash-chart-title">AI Classifications</div>
+          <canvas id="dashPieChart" height="150"></canvas>
+        </div>
+        <div class="dash-chart">
+          <div class="dash-chart-title">Risk Trend Matrix</div>
+          <canvas id="dashLineChart" height="150"></canvas>
+        </div>
+        <div class="dash-chart">
+          <div class="dash-chart-title">Model Feature Extraction</div>
+          <canvas id="dashBarChart" height="150"></canvas>
+        </div>
+      </div>
+      <div class="dash-history" style="margin-top: 20px;">
+        <div class="dash-chart-title">Recent Scan History</div>
+        <table class="history-table" id="historyTable" style="width:100%; text-align:left; border-collapse:collapse; font-size:12px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <th>Target</th><th>Risk Score</th><th>AI Prediction</th><th>Confidence</th><th>Model Accuracy</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ MAIN 3-COLUMN GRID ══════ -->
   <div class="main-grid">
 
     <!-- LEFT COLUMN -->
     <div class="col-left">
 
+      <!-- AI Confidence Module (NEW) -->
+      <div class="panel ai-confidence-panel" id="panelAI">
+        <div class="panel-header"><span class="panel-icon">🧠</span> AI CONFIDENCE MODULE</div>
+        <div class="panel-body">
+          <div class="ai-ring-wrap">
+            <div class="ai-ring" id="aiRing">
+              <div class="ai-ring-inner" id="aiRingInner">
+                <div class="ai-ring-pct" id="aiRingPct">0%</div>
+                <div class="ai-ring-label">AI CONF.</div>
+              </div>
+            </div>
+          </div>
+          <div class="ai-pattern-badge" id="aiPatternBadge">—</div>
+          <div class="ai-summary" id="aiSummary">—</div>
+          <div class="ai-signals" id="aiSignals"></div>
+        </div>
+      </div>
+
       <!-- Confidence Meter -->
       <div class="panel" id="panelConfidence">
-        <div class="panel-header"><span class="panel-icon">📡</span> AI PREDICTION METER</div>
+        <div class="panel-header"><span class="panel-icon">📡</span> AI HOSTING PREDICTION METER</div>
         <div class="panel-body">
           <div class="conf-label">
             <span>Provider:</span>
@@ -161,25 +230,47 @@
           <div class="conf-label mt">
             <span class="conf-sublabel">CONFIDENCE SCORE</span>
           </div>
-          <!-- Score breakdown -->
           <div class="breakdown-list" id="breakdownList"></div>
         </div>
       </div>
 
       <!-- Risk Gauge -->
       <div class="panel" id="panelRisk">
-        <div class="panel-header"><span class="panel-icon">🎯</span> RISK ASSESSMENT</div>
+        <div class="panel-header"><span class="panel-icon">🎯</span> RISK ASSESSMENT ENGINE v4.0</div>
         <div class="panel-body">
           <canvas id="riskGauge" height="160"></canvas>
-          <!-- Risk score breakdown -->
           <div class="risk-breakdown-grid" id="riskBreakdownGrid"></div>
           <div class="risk-factors" id="riskFactors"></div>
         </div>
       </div>
 
-      <!-- Attack Surface Summary -->
+      <!-- Threat Alerts System (NEW v8.0) -->
+      <div class="panel threat-alerts-panel" id="panelAlerts">
+        <div class="panel-header"><span class="panel-icon">🔔</span> ACTIVE THREAT ALERTS</div>
+        <div class="panel-body">
+          <div class="threat-alerts-list" id="threatAlertsList"></div>
+        </div>
+      </div>
+
+      <!-- Domain DNA Profile (NEW v8.0) -->
+      <div class="panel dna-panel" id="panelDna">
+        <div class="panel-header"><span class="panel-icon">🧬</span> DOMAIN DNA PROFILE</div>
+        <div class="panel-body">
+          <div id="dnaContent"></div>
+        </div>
+      </div>
+
+      <!-- Phishing Simulation (NEW v8.0) -->
+      <div class="panel phish-sim-panel" id="panelPhishSim">
+        <div class="panel-header"><span class="panel-icon">🎣</span> PHISHING SIMULATION ENGINE</div>
+        <div class="panel-body">
+          <div id="phishSimContent"></div>
+        </div>
+      </div>
+
+      <!-- Attack Surface -->
       <div class="panel" id="panelAttackSurface">
-        <div class="panel-header"><span class="panel-icon">🗡</span> ATTACK SURFACE</div>
+        <div class="panel-header"><span class="panel-icon">🗡</span> ATTACK SURFACE SUMMARY</div>
         <div class="panel-body">
           <div class="atk-surface-grid" id="atkSurfaceGrid"></div>
         </div>
@@ -189,6 +280,30 @@
 
     <!-- CENTER COLUMN -->
     <div class="col-center">
+
+      <!-- Origin Discovery (NEW 🔥) -->
+      <div class="panel origin-panel" id="panelOrigin">
+        <div class="panel-header"><span class="panel-icon">🔍</span> ORIGIN INFRASTRUCTURE DISCOVERY <span class="hot-badge">🔥 CORE</span></div>
+        <div class="panel-body">
+          <div id="originContent"></div>
+        </div>
+      </div>
+
+      <!-- ASN / Hosting Mismatch (NEW) -->
+      <div class="panel" id="panelAsn">
+        <div class="panel-header"><span class="panel-icon">⚡</span> ASN + HOSTING PROVIDER ANALYSIS</div>
+        <div class="panel-body">
+          <div id="asnContent"></div>
+        </div>
+      </div>
+
+      <!-- Redirect Chain (NEW) -->
+      <div class="panel" id="panelRedirect">
+        <div class="panel-header"><span class="panel-icon">↩</span> REDIRECT CHAIN ANALYSIS</div>
+        <div class="panel-body">
+          <div id="redirectContent"></div>
+        </div>
+      </div>
 
       <!-- Terminal Output -->
       <div class="panel terminal-panel" id="panelTerminal">
@@ -201,13 +316,14 @@
 
       <!-- IP History Chart -->
       <div class="panel" id="panelHistory">
-        <div class="panel-header"><span class="panel-icon">📊</span> IP HISTORY TIMELINE</div>
+        <div class="panel-header"><span class="panel-icon">📊</span> IP HISTORY TIMELINE + OSINT</div>
         <div class="panel-body">
           <canvas id="ipHistoryChart" height="140"></canvas>
+          <div class="osint-sim" id="osintSim"></div>
         </div>
       </div>
 
-      <!-- SSL / HTTP Analysis -->
+      <!-- SSL / HTTP -->
       <div class="panel" id="panelSslHttp">
         <div class="panel-header"><span class="panel-icon">🔐</span> SSL / HTTP SECURITY</div>
         <div class="panel-body">
@@ -244,6 +360,14 @@
         </div>
       </div>
 
+      <!-- XAI Module (NEW v8.0) -->
+      <div class="panel xai-panel" id="panelXai">
+        <div class="panel-header"><span class="panel-icon">⚖️</span> EXPLAINABLE AI (XAI) MODULE</div>
+        <div class="panel-body">
+          <div class="xai-grid" id="xaiGrid"></div>
+        </div>
+      </div>
+
       <!-- Threat Intel -->
       <div class="panel" id="panelThreat">
         <div class="panel-header"><span class="panel-icon">🦠</span> THREAT INTELLIGENCE</div>
@@ -266,11 +390,11 @@
 
       <!-- Report Button -->
       <div class="panel report-panel" id="panelReport">
-        <div class="panel-header"><span class="panel-icon">📄</span> GENERATE REPORT</div>
+        <div class="panel-header"><span class="panel-icon">📄</span> FORENSIC PDF REPORT</div>
         <div class="panel-body report-body">
-          <p class="report-desc">Export a full forensic PDF report including all findings, risk scores, SSL analysis, attack surface summary, and AI predictions.</p>
+          <p class="report-desc">Export a full forensic PDF including origin discovery, ASN analysis, redirect chain, AI confidence, risk scoring, SSL, GeoIP, and infrastructure map.</p>
           <button class="report-btn" onclick="downloadReport()">
-            <span>⬇ DOWNLOAD PDF REPORT</span>
+            <span>⬇ DOWNLOAD PDF REPORT v4.0</span>
             <span class="btn-glow"></span>
           </button>
         </div>
@@ -284,9 +408,9 @@
 <!-- ══════════════ FOOTER ══════════════ -->
 <footer class="site-footer">
   <div class="footer-inner">
-    <span>HostTrace AI © 2025 — Cyber Intelligence Platform</span>
+    <span>HostTrace AI © 2025 — Smart URL Risk Analyzer v4.0</span>
     <span class="footer-sep">|</span>
-    <span>OSINT • DNS • WHOIS • SSL • GeoIP • AI</span>
+    <span>OSINT • DNS • Origin Discovery • ASN • Redirect Chain • AI Confidence</span>
     <span class="footer-sep">|</span>
     <span>For authorized security research only</span>
   </div>

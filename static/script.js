@@ -1,6 +1,8 @@
 /**
- * HostTrace AI – script.js  v3.0
+ * HostTrace AI – script.js  v4.0
  * Frontend Logic: Scanning, UI, Charts, PDF Export
+ * New: Origin Discovery, ASN Mismatch, Redirect Chain, AI Confidence,
+ *      Infrastructure Map, Why Risky, OSINT Simulation panels
  */
 
 /* ════════════════════════════════════════════
@@ -70,38 +72,38 @@ const API_BASE = isLocal && window.location.port !== '5000' && window.location.p
   }
 })();
 
-/* ════════════════════════════════════════════
-   ENTER KEY SUPPORT
-═══════════════════════════════════════════ */
 document.getElementById('domainInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') startAnalysis();
 });
 
 /* ════════════════════════════════════════════
-   SCANNER STEPS  (14 steps per requirement)
+   SCANNER STEPS  (v4.0 — 18 steps)
 ═══════════════════════════════════════════ */
 const SCAN_STEPS = [
-  { pct:  7,  msg: '> Initializing OSINT engine…',           cls: 'header'  },
-  { pct: 15,  msg: '> Resolving DNS records…',               cls: 'info'    },
-  { pct: 23,  msg: '> Querying WHOIS database…',             cls: 'info'    },
-  { pct: 31,  msg: '> Checking CIDR ranges…',                cls: 'info'    },
-  { pct: 40,  msg: '> Inspecting SSL certificate…',          cls: 'info'    },
-  { pct: 49,  msg: '> Analyzing HTTP security headers…',     cls: 'info'    },
-  { pct: 57,  msg: '> Mapping IP geolocation…',              cls: 'info'    },
-  { pct: 65,  msg: '> Analyzing URL patterns…',              cls: 'warn'    },
-  { pct: 73,  msg: '> Scanning proxy indicators…',           cls: 'warn'    },
-  { pct: 81,  msg: '> Running AI prediction model…',         cls: 'info'    },
-  { pct: 87,  msg: '> Correlating threat intelligence…',     cls: 'warn'    },
-  { pct: 92,  msg: '> Calculating risk score…',              cls: 'warn'    },
-  { pct: 97,  msg: '> Generating forensic trace ID…',        cls: 'success' },
-  { pct: 100, msg: '> Finalising forensic report…',          cls: 'success' },
+  { pct:  5,  msg: '> Initializing OSINT engine v4.0…',         cls: 'header'  },
+  { pct: 12,  msg: '> Resolving DNS records…',                   cls: 'info'    },
+  { pct: 19,  msg: '> Querying WHOIS database…',                 cls: 'info'    },
+  { pct: 26,  msg: '> Checking CIDR / ASN ranges…',              cls: 'info'    },
+  { pct: 33,  msg: '> Inspecting SSL certificate…',              cls: 'info'    },
+  { pct: 39,  msg: '> Analyzing HTTP security headers…',         cls: 'info'    },
+  { pct: 45,  msg: '> Mapping IP geolocation…',                  cls: 'info'    },
+  { pct: 51,  msg: '> Analyzing URL patterns…',                  cls: 'warn'    },
+  { pct: 57,  msg: '> 🔥 Enumerating subdomains for origin leak…',cls: 'warn'   },
+  { pct: 63,  msg: '> Probing origin infrastructure…',           cls: 'warn'    },
+  { pct: 68,  msg: '> Detecting ASN / hosting mismatch…',        cls: 'warn'    },
+  { pct: 73,  msg: '> Tracing redirect chain…',                  cls: 'info'    },
+  { pct: 78,  msg: '> Running OSINT simulation…',                cls: 'info'    },
+  { pct: 83,  msg: '> Running AI prediction model…',             cls: 'info'    },
+  { pct: 87,  msg: '> Correlating threat intelligence…',         cls: 'warn'    },
+  { pct: 92,  msg: '> Calculating risk score (engine v4.0)…',    cls: 'warn'    },
+  { pct: 97,  msg: '> Generating AI confidence score…',          cls: 'success' },
+  { pct: 100, msg: '> Finalising forensic report…',              cls: 'success' },
 ];
-
 const SCAN_TITLES = [
-  'INITIALIZING','DNS LOOKUP','WHOIS QUERY','CIDR ANALYSIS',
-  'SSL INSPECTION','HTTP HEADERS','GEO-IP MAPPING','URL ANALYSIS',
-  'PROXY DETECTION','AI PREDICTION','THREAT INTEL','RISK SCORING',
-  'TRACE ID GEN','FINALIZING'
+  'INITIALIZING','DNS LOOKUP','WHOIS QUERY','CIDR ANALYSIS','SSL INSPECTION',
+  'HTTP HEADERS','GEO-IP','URL ANALYSIS','ORIGIN DISCOVERY','PROBING ORIGIN',
+  'ASN MISMATCH','REDIRECT CHAIN','OSINT SIM','AI PREDICTION',
+  'THREAT INTEL','RISK ENGINE v4','AI CONFIDENCE','FINALIZING'
 ];
 
 /* ════════════════════════════════════════════
@@ -114,7 +116,7 @@ async function startAnalysis() {
 
   showScanner();
   const controller = new AbortController();
-  const timeoutId  = setTimeout(() => controller.abort(), 45000);
+  const timeoutId  = setTimeout(() => controller.abort(), 60000);
 
   let apiResp = null, apiErr = null;
 
@@ -135,7 +137,7 @@ async function startAnalysis() {
     if (currentStep === totalSteps - 1) {
       apiResp = await apiCall;
       if (apiErr) {
-        const isOffline = apiErr.message.includes('Failed to fetch') || apiErr.message.includes('NetworkError') || apiErr.name === 'AbortError';
+        const isOffline = apiErr.message.includes('Failed to fetch') || apiErr.name === 'AbortError';
         hideScanner();
         showFatalError(isOffline ? 'Could not reach backend. Is app.py running?' : apiErr.message);
         return false;
@@ -162,10 +164,8 @@ function showScanner() {
   document.getElementById('scanPercent').textContent = '0%';
   document.getElementById('scannerLog').innerHTML    = '';
   document.getElementById('scannerTitle').textContent = 'INITIALIZING SCAN';
-  document.getElementById('scannerTitle').style.color = '';
 }
 function hideScanner() { document.getElementById('scannerOverlay').classList.add('hidden'); }
-
 function showFatalError(msg) {
   document.getElementById('fatalMsg').textContent = msg || 'Unknown error.';
   document.getElementById('fatalErrorOverlay').classList.remove('hidden');
@@ -173,33 +173,29 @@ function showFatalError(msg) {
 function closeFatalError() { document.getElementById('fatalErrorOverlay').classList.add('hidden'); }
 
 function runScanAnimation(onStep, onComplete) {
-  const bar    = document.getElementById('scanBar');
-  const pctEl  = document.getElementById('scanPercent');
-  const titleEl= document.getElementById('scannerTitle');
-  let stepIdx  = 0;
-
+  const bar=document.getElementById('scanBar'), pctEl=document.getElementById('scanPercent');
+  const titleEl=document.getElementById('scannerTitle');
+  let stepIdx=0;
   const tick = setInterval(async () => {
     if (stepIdx >= SCAN_STEPS.length) { clearInterval(tick); onComplete(); return; }
     const proceed = await onStep(stepIdx, SCAN_STEPS.length);
     if (!proceed) { clearInterval(tick); return; }
     const s = SCAN_STEPS[stepIdx];
-    bar.style.width     = s.pct + '%';
-    pctEl.textContent   = s.pct + '%';
-    titleEl.textContent = SCAN_TITLES[stepIdx] || 'SCANNING';
-    logToScanner(s.msg, s.cls);
-    stepIdx++;
-  }, 340);
+    bar.style.width=s.pct+'%'; pctEl.textContent=s.pct+'%';
+    titleEl.textContent=SCAN_TITLES[stepIdx]||'SCANNING';
+    logToScanner(s.msg, s.cls); stepIdx++;
+  }, 320);
 }
 
 function logToScanner(msg, cls) {
-  const logEl = document.getElementById('scannerLog');
-  const line  = document.createElement('div');
-  line.textContent = msg; line.className = `term-line ${cls}`;
-  logEl.appendChild(line); logEl.scrollTop = logEl.scrollHeight;
+  const logEl=document.getElementById('scannerLog');
+  const line=document.createElement('div');
+  line.textContent=msg; line.className=`term-line ${cls}`;
+  logEl.appendChild(line); logEl.scrollTop=logEl.scrollHeight;
 }
 
 /* ════════════════════════════════════════════
-   RENDER RESULTS
+   RENDER RESULTS (master)
 ═══════════════════════════════════════════ */
 function renderResults(data) {
   const sec = document.getElementById('resultsSection');
@@ -208,39 +204,46 @@ function renderResults(data) {
 
   renderVerdictBar(data);
   renderSummaryCards(data);
+  renderInfrastructureMap(data.infrastructure_map || []);
+  renderWhyRisky(data.why_risky || []);
+  renderAiConfidence(data.ai_confidence || {});
   renderConfidenceMeter(data);
   renderRiskGauge(data.risk_score, data.risk_level);
   renderRiskBreakdown(data.risk_breakdown || {});
   renderRiskFactors(data.explanation || []);
   renderAttackSurface(data.attack_surface || {});
+  renderOriginDiscovery(data.origin_discovery || {});
+  renderAsnMismatch(data.asn_analysis || {});
+  renderRedirectChain(data.redirect_chain || {});
   renderTerminal(data);
   renderIpHistory(data.ip_history || []);
+  renderOsintSim(data.osint_simulation || {});
   renderSslHttp(data.ssl_analysis || {}, data.http_analysis || {});
   renderWhois(data.whois || {});
-  renderGeoIp(data.geo_analysis || {});
-  renderUrlAnalysis(data.url_analysis || {});
+  renderGeoIp(data.geo_analysis || {}, data.threat_region || {});
+  renderUrlAnalysis(data.url_analysis || {}, data.lookalike || {});
   renderThreatIntel(data.threat_intel || {});
   renderBreakdown(data.score_breakdown || {});
+  updateDashboard(data);
+  renderV8Modules(data);
 }
 
 /* ════════════════════════════════════════════
    VERDICT BAR
 ═══════════════════════════════════════════ */
 function renderVerdictBar(data) {
-  document.getElementById('traceId').textContent     = data.trace_id  || '—';
+  document.getElementById('traceId').textContent      = data.trace_id  || '—';
   document.getElementById('reportIdBadge').textContent = data.report_id || '—';
-  document.getElementById('scanTs').textContent      = data.scan_timestamp || '—';
-
+  document.getElementById('scanTs').textContent        = data.scan_timestamp || '—';
   const v = data.verdict || {};
   const badge = document.getElementById('verdictBadge');
   badge.textContent = v.badge || v.status || '—';
   badge.className   = 'verdict-status-badge';
-  const s = (v.status || '').toLowerCase().replace(' ','');
-  if (s === 'safe') badge.classList.add('safe');
-  else if (s === 'suspicious') badge.classList.add('suspicious');
+  const s = (v.status||'').toLowerCase().replace(' ','');
+  if (s==='safe') badge.classList.add('safe');
+  else if (s==='suspicious') badge.classList.add('suspicious');
   else badge.classList.add('high-risk');
-
-  document.getElementById('verdictConf').textContent = `Confidence: ${v.confidence || '—'}%`;
+  document.getElementById('verdictConf').textContent = `Confidence: ${v.confidence||'—'}%`;
 }
 
 /* ════════════════════════════════════════════
@@ -248,52 +251,233 @@ function renderVerdictBar(data) {
 ═══════════════════════════════════════════ */
 function renderSummaryCards(data) {
   document.getElementById('resDomain').textContent = data.domain;
-  document.getElementById('resIPs').textContent = data.ip_addresses && data.ip_addresses.length
+  document.getElementById('resIPs').textContent = data.ip_addresses?.length
     ? data.ip_addresses.join(' · ') : 'Resolution failed';
 
-  const proxyVal  = document.getElementById('resProxy');
-  const proxySub  = document.getElementById('resProxyProvider');
-  const proxyIcon = document.getElementById('proxyIcon');
+  const proxyVal=document.getElementById('resProxy'), proxySub=document.getElementById('resProxyProvider');
+  const proxyIcon=document.getElementById('proxyIcon');
   if (data.proxy_detected) {
-    proxyVal.textContent = 'PROXY ACTIVE'; proxyVal.className = 'card-value proxy-yes';
-    proxyIcon.textContent = '🔴'; proxySub.textContent = data.proxy_provider || 'Unknown';
+    proxyVal.textContent='PROXY ACTIVE'; proxyVal.className='card-value proxy-yes';
+    proxyIcon.textContent='🔴'; proxySub.textContent=data.proxy_provider||'Unknown';
   } else if (data.cdn_detected) {
-    proxyVal.textContent = 'CDN LAYER'; proxyVal.className = 'card-value risk-medium';
-    proxyIcon.textContent = '🟡'; proxySub.textContent = data.cdn_provider || 'Unknown CDN';
+    proxyVal.textContent='CDN LAYER'; proxyVal.className='card-value risk-medium';
+    proxyIcon.textContent='🟡'; proxySub.textContent=data.cdn_provider||'Unknown CDN';
   } else {
-    proxyVal.textContent = 'DIRECT HOST'; proxyVal.className = 'card-value proxy-no';
-    proxyIcon.textContent = '🟢'; proxySub.textContent = 'No proxy detected';
-  }
-
-  // CDN sub info (fix: show CDN provider when proxy IS Cloudflare)
-  if (data.cdn_detected && data.cdn_provider) {
-    const cdnInfo = document.createElement('div');
-    cdnInfo.className = 'card-sub';
-    cdnInfo.style.marginTop = '2px';
-    cdnInfo.innerHTML = `CDN: <span style="color:var(--blue)">${data.cdn_provider}</span>`;
-    const proxyCard = document.getElementById('proxyCard');
-    // Remove old CDN hint if exists
-    const old = proxyCard.querySelector('.cdn-hint');
-    if (old) old.remove();
-    cdnInfo.classList.add('cdn-hint');
-    proxyCard.appendChild(cdnInfo);
+    proxyVal.textContent='DIRECT HOST'; proxyVal.className='card-value proxy-no';
+    proxyIcon.textContent='🟢'; proxySub.textContent='No proxy detected';
   }
 
   document.getElementById('resHosting').textContent   = data.real_hosting || '—';
   document.getElementById('resConfidence').textContent = `Confidence: ${data.confidence}%`;
-
   const possEl = document.getElementById('resPossibleHosting');
   if (data.possible_hosting) {
-    possEl.textContent = `Possible: ${data.possible_hosting} (low confidence)`;
-    possEl.className   = 'card-sub possible-hosting-hint';
-  } else {
-    possEl.textContent = '';
+    possEl.textContent='Possible: '+data.possible_hosting; possEl.className='card-sub possible-hosting-hint';
+  } else { possEl.textContent=''; }
+
+  const riskLvl=document.getElementById('resRiskLevel');
+  riskLvl.textContent=data.risk_level||'—';
+  riskLvl.className=`card-value risk-${(data.risk_level||'').toLowerCase()}`;
+  document.getElementById('resRiskScore').textContent=`Score: ${data.risk_score}/100`;
+
+  // AI confidence card
+  const ai = data.ai_confidence || {};
+  document.getElementById('resAiConf').textContent = `${ai.ai_confidence_pct||0}%`;
+  document.getElementById('resInfraPattern').textContent = ai.infrastructure_pattern || '—';
+}
+
+/* ════════════════════════════════════════════
+   INFRASTRUCTURE MAP  (NEW 🔥)
+═══════════════════════════════════════════ */
+function renderInfrastructureMap(nodes) {
+  const container = document.getElementById('infraMapContainer');
+  if (!nodes.length) { container.innerHTML='<div class="infra-empty">No infrastructure data available</div>'; return; }
+
+  const typeColors = {
+    user:'#00eaff', proxy:'#ff4f6d', cdn:'#ffd166',
+    origin_leaked:'#ff9a3c', origin_hidden:'#bc5af7', direct:'#00ff9f'
+  };
+
+  let html = '<div class="infra-map">';
+  nodes.forEach((n, i) => {
+    const col = typeColors[n.type] || '#00eaff';
+    html += `<div class="infra-node" style="--node-color:${col}">
+      <div class="infra-node-icon">${n.node.split(' ')[0]}</div>
+      <div class="infra-node-label">${escapeHtml(n.node.replace(/^.\s/,''))}</div>
+      <div class="infra-node-note">${escapeHtml(n.note||'')}</div>
+      ${n.ips ? `<div class="infra-node-ips">${n.ips.map(ip=>`<span class="ip-pill">${ip}</span>`).join('')}</div>` : ''}
+    </div>`;
+    if (i < nodes.length - 1) {
+      html += `<div class="infra-arrow"><span>→</span></div>`;
+    }
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+/* ════════════════════════════════════════════
+   WHY RISKY  (NEW — Explainable Output)
+═══════════════════════════════════════════ */
+function renderWhyRisky(reasons) {
+  const grid = document.getElementById('whyRiskyGrid');
+  if (!reasons.length) { grid.innerHTML='<div class="why-empty">✅ No risk factors identified</div>'; return; }
+  grid.innerHTML = reasons.map(r => {
+    const icon = r.split(' ')[0];
+    const text = r.slice(icon.length+1);
+    const isGood = r.includes('✅');
+    return `<div class="why-item ${isGood?'why-good':''}">
+      <span class="why-icon">${icon}</span>
+      <span class="why-text">${escapeHtml(text)}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ════════════════════════════════════════════
+   AI CONFIDENCE MODULE  (NEW)
+═══════════════════════════════════════════ */
+function renderAiConfidence(ai) {
+  const pct  = ai.ai_confidence_pct || 0;
+  const color = pct >= 75 ? '#ff4f6d' : pct >= 50 ? '#ffd166' : '#00ff9f';
+
+  // Animate ring via CSS custom property
+  const ring = document.getElementById('aiRing');
+  ring.style.setProperty('--ai-pct', pct);
+  ring.style.setProperty('--ai-color', color);
+  ring.style.background = `conic-gradient(${color} ${pct*3.6}deg, rgba(0,234,255,0.08) 0deg)`;
+
+  setTimeout(() => {
+    document.getElementById('aiRingPct').textContent = pct + '%';
+    document.getElementById('aiRingPct').style.color = color;
+  }, 300);
+
+  const pat = document.getElementById('aiPatternBadge');
+  pat.textContent  = ai.infrastructure_pattern || '—';
+  pat.style.color  = color;
+  pat.style.borderColor = color;
+
+  document.getElementById('aiSummary').textContent = ai.summary || '—';
+
+  const signals = document.getElementById('aiSignals');
+  signals.innerHTML = (ai.ai_explanation || []).map(s =>
+    `<div class="ai-signal-item">⬡ ${escapeHtml(s)}</div>`
+  ).join('');
+}
+
+/* ════════════════════════════════════════════
+   ORIGIN DISCOVERY  (NEW 🔥)
+═══════════════════════════════════════════ */
+function renderOriginDiscovery(od) {
+  const el = document.getElementById('originContent');
+  const ips  = od.possible_origin_ips || [];
+  const conf = od.confidence || 'Low';
+  const confColor = { High:'#ff4f6d', Medium:'#ffd166', Low:'#00ff9f' }[conf] || '#00eaff';
+  const leaks = (od.subdomain_leaks || []).filter(l => !l.is_proxy);
+
+  let html = `<div class="origin-header">
+    <div class="origin-stat"><span class="os-label">SUBDOMAINS CHECKED</span><span class="os-val">${od.subdomains_checked||0}</span></div>
+    <div class="origin-stat"><span class="os-label">ORIGIN IPs FOUND</span><span class="os-val ${ips.length?'val-warn':''}">${ips.length}</span></div>
+    <div class="origin-stat"><span class="os-label">CONFIDENCE</span><span class="os-val" style="color:${confColor}">${conf}</span></div>
+    <div class="origin-stat"><span class="os-label">INFRASTRUCTURE TYPE</span><span class="os-val" style="color:var(--cyan)">${od.proxy_detected ? 'CDN Protected' : (ips.length > 1 ? 'Enterprise Distributed' : 'Single Host')}</span></div>
+  </div>`;
+
+  if (ips.length) {
+    html += `<div class="origin-ips"><div class="origin-label">🎯 POSSIBLE ORIGIN IP(S)</div>${ips.map(ip=>`<span class="origin-ip-pill">${ip}</span>`).join('')}</div>`;
   }
 
-  const riskLvl = document.getElementById('resRiskLevel');
-  riskLvl.textContent = data.risk_level || '—';
-  riskLvl.className   = `card-value risk-${(data.risk_level||'').toLowerCase()}`;
-  document.getElementById('resRiskScore').textContent = `Score: ${data.risk_score}/100`;
+  if (leaks.length) {
+    html += `<div class="origin-leaks"><div class="origin-label">⚠ SUBDOMAIN LEAKS (non-proxy IPs)</div>`;
+    leaks.slice(0,6).forEach(l => {
+      html += `<div class="leak-row"><span class="leak-sub">${escapeHtml(l.subdomain)}</span><span class="leak-ip">${l.ip}</span><span class="leak-note">${escapeHtml(l.note)}</span></div>`;
+    });
+    html += `</div>`;
+  } else if (!od.origin_suspected) {
+    html += `<div class="origin-clean">✓ No origin IP leaks detected through subdomain enumeration</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+/* ════════════════════════════════════════════
+   ASN MISMATCH  (NEW)
+═══════════════════════════════════════════ */
+function renderAsnMismatch(asn) {
+  const el = document.getElementById('asnContent');
+  const mismatch = asn.mismatch_detected;
+  let html = `<div class="asn-grid">
+    <div class="asn-card">
+      <div class="asn-label">PROXY LAYER</div>
+      <div class="asn-val">${escapeHtml(asn.proxy_provider||'—')}</div>
+    </div>
+    <div class="asn-arrow">⟶</div>
+    <div class="asn-card ${mismatch?'asn-mismatch':''}">
+      <div class="asn-label">ORIGIN ASN</div>
+      <div class="asn-val">${escapeHtml(asn.origin_asn_provider||'Unknown')}</div>
+    </div>
+  </div>`;
+
+  if (mismatch) {
+    html += `<div class="mismatch-alert">⚡ MISMATCH DETECTED<div class="mismatch-note">${escapeHtml(asn.mismatch_note||'')}</div></div>`;
+  } else {
+    html += `<div class="asn-clean">✓ ${asn.proxy_provider?'Proxy and origin provider appear consistent':'No mismatch detected'}</div>`;
+  }
+
+  if ((asn.origin_asn_providers||[]).length > 1) {
+    html += `<div class="asn-multi">Multiple origin providers detected: ${asn.origin_asn_providers.join(', ')}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+/* ════════════════════════════════════════════
+   REDIRECT CHAIN  (NEW)
+═══════════════════════════════════════════ */
+function renderRedirectChain(rc) {
+  const el = document.getElementById('redirectContent');
+  const chain = rc.chain || [];
+  const suspicious = rc.suspicious;
+
+  let html = `<div class="redirect-stats">
+    <span class="rs-item">Total Hops: <b>${rc.total_hops||0}</b></span>
+    <span class="rs-item">Redirects: <b style="color:${suspicious?'#ff4f6d':'#00ff9f'}">${rc.redirect_count||0}</b></span>
+    <span class="rs-item ${suspicious?'rs-warn':'rs-ok'}">${suspicious?'⚠ SUSPICIOUS':'✓ NORMAL'}</span>
+  </div>`;
+
+  if (chain.length) {
+    html += `<div class="redirect-chain">`;
+    chain.forEach(hop => {
+      const statusColor = hop.status >= 300 && hop.status < 400 ? '#ffd166'
+        : hop.status >= 200 && hop.status < 300 ? '#00ff9f' : '#ff4f6d';
+      html += `<div class="rchain-hop">
+        <span class="rchain-num">${hop.hop}</span>
+        <span class="rchain-url">${escapeHtml((hop.url||'').slice(0,60))}${(hop.url||'').length>60?'…':''}</span>
+        <span class="rchain-status" style="color:${statusColor}">${hop.status}</span>
+        ${hop.final?'<span class="rchain-final">FINAL</span>':'<span class="rchain-arrow">→</span>'}
+      </div>`;
+    });
+    html += `</div>`;
+  } else {
+    html += `<div class="redirect-none">✓ No redirects detected — direct connection</div>`;
+  }
+  el.innerHTML = html;
+}
+
+/* ════════════════════════════════════════════
+   OSINT SIMULATION
+═══════════════════════════════════════════ */
+function renderOsintSim(osint) {
+  const el = document.getElementById('osintSim');
+  if (!osint || !osint.records) { el.innerHTML=''; return; }
+  const expColor = osint.exposure_detected ? '#ffd166' : '#00ff9f';
+  let html = `<div class="osint-header" style="color:${expColor}">${escapeHtml(osint.exposure_note||'')}</div>
+  <div class="osint-records">`;
+  (osint.records||[]).forEach(r => {
+    html += `<div class="osint-row">
+      <span class="osint-date">${r.date}</span>
+      <span class="osint-ip">${r.ip}</span>
+      <span class="osint-prov">${escapeHtml(r.provider)}</span>
+      <span class="osint-type">${escapeHtml(r.type)}</span>
+    </div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
 }
 
 /* ════════════════════════════════════════════
@@ -318,20 +502,15 @@ function renderBreakdown(scores) {
   let i = 0;
   for (const [provider, score] of Object.entries(scores)) {
     if (score === 0) { i++; continue; }
-    const pct   = Math.round((score / maxVal) * 100);
-    const color = colors[i % colors.length];
-    const item  = document.createElement('div');
-    item.className = 'breakdown-item';
-    item.innerHTML = `
-      <span class="breakdown-name">${provider}</span>
-      <div class="breakdown-bar-wrap">
-        <div class="breakdown-bar" style="width:0%;background:${color}" data-target="${pct}"></div>
-      </div>
+    const pct=Math.round((score/maxVal)*100), color=colors[i%colors.length];
+    const item=document.createElement('div'); item.className='breakdown-item';
+    item.innerHTML=`<span class="breakdown-name">${provider}</span>
+      <div class="breakdown-bar-wrap"><div class="breakdown-bar" style="width:0%;background:${color}" data-target="${pct}"></div></div>
       <span class="breakdown-score">${score}</span>`;
     container.appendChild(item); i++;
   }
   setTimeout(() => {
-    container.querySelectorAll('.breakdown-bar').forEach(b => { b.style.width = b.dataset.target + '%'; });
+    container.querySelectorAll('.breakdown-bar').forEach(b => { b.style.width=b.dataset.target+'%'; });
   }, 300);
 }
 
@@ -351,7 +530,7 @@ function renderRiskGauge(score, level) {
     options: { cutout:'72%', animation:{animateRotate:true,duration:1000},
       plugins:{legend:{display:false},tooltip:{enabled:false}} },
     plugins: [{ id:'centerText', afterDraw(chart) {
-      const {ctx:c,width:w,height:h} = chart; c.save();
+      const {ctx:c,width:w,height:h}=chart; c.save();
       c.font=`bold 22px "Orbitron",sans-serif`; c.fillStyle=color;
       c.textAlign='center'; c.textBaseline='middle';
       c.fillText(score,w/2,h/2-10);
@@ -362,25 +541,28 @@ function renderRiskGauge(score, level) {
 }
 
 /* ════════════════════════════════════════════
-   RISK BREAKDOWN GRID
+   RISK BREAKDOWN GRID  (v4.0 — new weights)
 ═══════════════════════════════════════════ */
 function renderRiskBreakdown(rb) {
   const grid = document.getElementById('riskBreakdownGrid');
   const items = [
-    { label:'PROXY RISK',       key:'proxy_risk' },
-    { label:'BLACKLIST',        key:'blacklist_hits' },
-    { label:'SUSP. TLD',        key:'suspicious_tld' },
-    { label:'NEW DOMAIN',       key:'new_domain' },
-    { label:'TRUSTED REG.',     key:'trusted_registrar' },
-    { label:'CLEAN INTEL',      key:'clean_threat_intel' },
+    { label:'PROXY RISK',      key:'proxy_risk' },
+    { label:'HIDDEN ORIGIN',   key:'hidden_origin' },
+    { label:'BLACKLIST',       key:'blacklist_hits' },
+    { label:'SUSP. TLD',       key:'suspicious_tld' },
+    { label:'NEW DOMAIN',      key:'new_domain' },
+    { label:'LOGIN KW',        key:'login_keywords' },
+    { label:'REDIRECTS',       key:'redirect_chain' },
+    { label:'GEO MISMATCH',    key:'geo_mismatch' },
+    { label:'HOST MISMATCH',   key:'hosting_mismatch' },
+    { label:'CLEAN INTEL',     key:'clean_threat_intel' },
   ];
   grid.innerHTML = items.map(({ label, key }) => {
     const val = rb[key] || 0;
     const cls = val > 0 ? 'rbi-positive' : val < 0 ? 'rbi-negative' : 'rbi-neutral';
-    const sign = val > 0 ? '+' : '';
     return `<div class="risk-breakdown-item">
       <div class="rbi-label">${label}</div>
-      <div class="rbi-value ${cls}">${sign}${val}</div>
+      <div class="rbi-value ${cls}">${val>0?'+':''}${val}</div>
     </div>`;
   }).join('');
 }
@@ -390,7 +572,7 @@ function renderRiskBreakdown(rb) {
 ═══════════════════════════════════════════ */
 function renderRiskFactors(items) {
   const el = document.getElementById('riskFactors');
-  el.innerHTML = items.slice(0,7).map(f => `<div class="risk-factor-item">${escapeHtml(f)}</div>`).join('');
+  el.innerHTML = items.slice(0,8).map(f => `<div class="risk-factor-item">${escapeHtml(f)}</div>`).join('');
 }
 
 /* ════════════════════════════════════════════
@@ -411,85 +593,75 @@ function renderAttackSurface(atk) {
       <div class="atk-icon">${icon}</div>
       <div class="atk-text">
         <div class="atk-title">${title}</div>
-        <div class="atk-detail">${escapeHtml(data.detail || '—')}</div>
+        <div class="atk-detail">${escapeHtml(data.detail||'—')}</div>
       </div>
-      <div class="atk-badge atk-${riskCls}">${data.status || '—'}</div>
+      <div class="atk-badge atk-${riskCls}">${data.status||'—'}</div>
     </div>`;
   }).join('');
 }
 
 /* ════════════════════════════════════════════
-   TERMINAL OUTPUT
+   TERMINAL OUTPUT  (v4.0 — new fields)
 ═══════════════════════════════════════════ */
 function renderTerminal(data) {
   const body = document.getElementById('terminalBody');
   body.innerHTML = '';
-
-  const ssl   = data.ssl_analysis  || {};
-  const http  = data.http_analysis || {};
-  const geo   = data.geo_analysis  || {};
-  const url   = data.url_analysis  || {};
-  const v     = data.verdict       || {};
+  const ssl=data.ssl_analysis||{}, http=data.http_analysis||{};
+  const geo=data.geo_analysis||{}, url=data.url_analysis||{};
+  const v=data.verdict||{}, od=data.origin_discovery||{};
+  const asn=data.asn_analysis||{}, rc=data.redirect_chain||{};
+  const ai=data.ai_confidence||{};
 
   const lines = [
-    { cls:'header',  text:`══════ HostTrace AI v3.0 — ${data.domain} ══════` },
-    { cls:'info',    text:`> Trace ID        : ${data.trace_id || '—'}` },
-    { cls:'info',    text:`> Report ID       : ${data.report_id || '—'}` },
-    { cls:'info',    text:`> Scan timestamp  : ${data.scan_timestamp}` },
-    { cls:'info',    text:`> IP addresses    : ${(data.ip_addresses||[]).join(', ') || 'N/A'}` },
-    { cls: data.proxy_detected?'danger':'success',
-      text:`> Proxy detected  : ${data.proxy_detected ? 'YES — '+data.proxy_provider : 'NO'}` },
-    { cls: data.cdn_detected?'warn':'info',
-      text:`> CDN detected    : ${data.cdn_detected ? 'YES — '+data.cdn_provider : 'NO'}` },
-    { cls:'success', text:`> Real hosting    : ${data.real_hosting} (${data.confidence}% conf.)` },
-    data.possible_hosting ? { cls:'warn', text:`> Possible host   : ${data.possible_hosting} (low confidence)` } : null,
+    { cls:'header',  text:`══════ HostTrace AI v4.0 — ${data.domain} ══════` },
+    { cls:'info',    text:`> Trace ID        : ${data.trace_id||'—'}` },
+    { cls:'info',    text:`> Report ID       : ${data.report_id||'—'}` },
+    { cls:'info',    text:`> Scan Timestamp  : ${data.scan_timestamp}` },
+    { cls:'info',    text:`> IP Addresses    : ${(data.ip_addresses||[]).join(', ')||'N/A'}` },
+    { cls:data.proxy_detected?'danger':'success',
+      text:`> Proxy/CDN Layer : ${data.proxy_detected?'Detected — '+data.proxy_provider:'Not Detected'}` },
+    { cls:data.cdn_detected?'warn':'info',
+      text:`> CDN Detected    : ${data.cdn_detected?'YES — '+data.cdn_provider:'NO'}` },
+    { cls:'success', text:`> Real Hosting    : ${data.real_hosting} (${data.confidence}% conf.)` },
+    data.possible_hosting?{ cls:'warn', text:`> Possible Host   : ${data.possible_hosting}` }:null,
+    { cls:'header',  text:'─────── 🔥 ORIGIN DISCOVERY ───────' },
+    { cls:'info',
+      text:`> Infra Type      : ${data.proxy_detected ? 'CDN Protected' : (data.ip_addresses?.length > 1 ? 'Enterprise Distributed' : 'Single Host')} (Confidence: ${od.confidence||'—'})` },
+    { cls:od.origin_suspected?'warn':'info',
+      text:`> Possible IPs    : ${(od.possible_origin_ips||[]).join(', ')||'None found'}` },
+    { cls:'info',    text:`> Subdomains Scan : ${od.subdomains_checked||0} checked` },
+    { cls:'header',  text:'─────── ASN ANALYSIS ───────' },
+    { cls:asn.mismatch_detected?'danger':'success',
+      text:`> Mismatch        : ${asn.mismatch_detected?'YES ⚠ '+asn.mismatch_note:'NO — consistent'}` },
+    { cls:'info',    text:`> Proxy Layer     : ${asn.proxy_provider||'—'}` },
+    { cls:'info',    text:`> Origin ASN      : ${asn.origin_asn_provider||'Unknown'}` },
+    { cls:'header',  text:'─────── REDIRECT CHAIN ───────' },
+    { cls:rc.suspicious?'danger':'success',
+      text:`> Redirects       : ${rc.redirect_count||0} hops ${rc.suspicious?'⚠ SUSPICIOUS':'✓ Normal'}` },
+    { cls:'header',  text:'─────── AI CONFIDENCE ───────' },
+    { cls:'info',    text:`> AI Confidence   : ${ai.ai_confidence_pct||0}%` },
+    { cls:'info',    text:`> Infra Pattern   : ${ai.infrastructure_pattern||'—'}` },
     { cls:'header',  text:'─────── SSL ANALYSIS ───────' },
-    { cls: ssl.ssl_valid?'success':'danger',
-      text:`> SSL Valid       : ${ssl.ssl_valid ? 'YES' : 'NO'} ${ssl.error ? '('+ssl.error.slice(0,40)+')' : ''}` },
-    { cls: ssl.ssl_expired?'danger':'info',
-      text:`> SSL Expired     : ${ssl.ssl_expired ? 'YES ⚠' : 'NO'}` },
-    { cls: ssl.self_signed?'danger':'info',
-      text:`> Self-signed     : ${ssl.self_signed ? 'YES ⚠' : 'NO'}` },
-    { cls:'info',    text:`> SSL Grade       : ${ssl.grade || 'N/A'}  |  Expires: ${ssl.valid_until || 'Unknown'}` },
-    { cls:'header',  text:'─────── HTTP HEADERS ───────' },
-    { cls: http.hsts?'success':'warn',
-      text:`> HSTS            : ${http.hsts ? 'PRESENT ✓' : 'MISSING ⚠'}` },
-    { cls: http.csp?'success':'warn',
-      text:`> CSP             : ${http.csp ? 'PRESENT ✓' : 'MISSING ⚠'}` },
-    { cls:'info',    text:`> Server Header   : ${http.server || 'Unknown'}` },
-    { cls: http.cdn_via_header?'warn':'info',
-      text:`> CDN via Header  : ${http.cdn_via_header || 'Not detected'}` },
-    { cls:'header',  text:'─────── GEO-IP ───────' },
-    { cls: geo.is_flagged_region?'danger':'success',
-      text:`> IP Region       : ${geo.primary_country || 'Unknown'} (${geo.country_code || '?'}) ${geo.is_flagged_region ? '⚠ FLAGGED' : '✓ Clean'}` },
-    { cls:'header',  text:'─────── URL ANALYSIS ───────' },
-    { cls: url.suspicious_tld?'danger':'info',
-      text:`> Suspicious TLD  : ${url.suspicious_tld ? 'YES — '+url.tld : 'NO'}` },
-    url.suspicious_keywords && url.suspicious_keywords.length ? { cls:'warn', text:`> Phishing KWords : ${url.suspicious_keywords.slice(0,4).join(', ')}` } : null,
-    { cls:'info',    text:`> URL Length      : ${url.url_length || 0} chars  |  Phishing Score: ${url.phishing_score || 0}/100` },
+    { cls:ssl.ssl_valid?'success':'danger',
+      text:`> SSL Valid       : ${ssl.ssl_valid?'YES':'NO'}` },
+    { cls:ssl.ssl_expired?'danger':'info',
+      text:`> SSL Expired     : ${ssl.ssl_expired?'YES ⚠':'NO'}` },
+    { cls:'info',    text:`> SSL Grade       : ${ssl.grade||'N/A'} | Expires: ${ssl.valid_until||'?'}` },
     { cls:'header',  text:'─────── VERDICT ───────' },
-    { cls: v.status==='SAFE'?'success':v.status==='HIGH RISK'?'danger':'warn',
-      text:`> Final Status    : ${v.badge || v.status || '—'} (${v.confidence || 0}% confidence)` },
-    { cls:'info',    text:`> ${v.note || ''}` },
-    { cls:'header',  text:'─────── THREAT INTEL ───────' },
-    { cls:'warn',    text:`> VT Flags        : ${data.threat_intel?.virustotal_flags ?? 0}` },
-    { cls:'warn',    text:`> Blacklist hits  : ${data.threat_intel?.blacklist_hits ?? 0}` },
-    { cls:'header',  text:'─────── EXPLANATION LOG ───────' },
-    ...(data.explanation||[]).slice(0,8).map(e => ({ cls:'info', text:`  • ${e}` })),
+    { cls:v.status==='SAFE'?'success':v.status==='HIGH RISK'?'danger':'warn',
+      text:`> Final Status    : ${v.badge||v.status||'—'} (${v.confidence||0}% confidence)` },
+    { cls:'info',    text:`> ${v.note||''}` },
     { cls:'success', text:'> Analysis complete ✓' },
   ].filter(Boolean);
 
-  let i = 0;
-  const cursor = document.createElement('span');
-  cursor.className = 'term-cursor';
+  let i=0;
+  const cursor=document.createElement('span'); cursor.className='term-cursor';
   function addLine() {
-    if (i >= lines.length) { body.appendChild(cursor); return; }
-    const div = document.createElement('div');
-    div.className = `term-line ${lines[i].cls}`;
-    div.textContent = lines[i].text;
-    body.appendChild(div);
-    body.scrollTop = body.scrollHeight;
-    i++; setTimeout(addLine, 35);
+    if (i>=lines.length) { body.appendChild(cursor); return; }
+    const div=document.createElement('div');
+    div.className=`term-line ${lines[i].cls}`; div.textContent=lines[i].text;
+    body.appendChild(div); body.scrollTop=body.scrollHeight;
+    i++; setTimeout(addLine, 30);
   }
   addLine();
 }
@@ -500,25 +672,21 @@ function renderTerminal(data) {
 function renderIpHistory(history) {
   const ctx = document.getElementById('ipHistoryChart').getContext('2d');
   if (ipChart) { ipChart.destroy(); }
-  const labels  = history.map(h => h.timestamp);
-  const ips     = history.map(h => h.ip);
-  const ipSet   = [...new Set(ips)];
-  const dataVals= ips.map(ip => ipSet.indexOf(ip) + 1);
+  const labels=history.map(h=>h.timestamp), ips=history.map(h=>h.ip);
+  const ipSet=[...new Set(ips)], dataVals=ips.map(ip=>ipSet.indexOf(ip)+1);
   ipChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets: [{ label:'IP Change Events', data:dataVals,
+    type:'line',
+    data:{ labels, datasets:[{ label:'IP Change Events', data:dataVals,
       borderColor:'#00eaff', backgroundColor:'rgba(0,234,255,0.06)',
-      pointBackgroundColor:'#00ff9f', pointBorderColor:'#010d14',
-      pointRadius:5, pointHoverRadius:8, fill:true, tension:0.4, borderWidth:2 }] },
-    options: { responsive:true, maintainAspectRatio:true, animation:{duration:1000},
-      scales: {
-        x: { ticks:{color:'#4a7a9b',font:{family:'Share Tech Mono',size:10}}, grid:{color:'rgba(0,234,255,0.05)'} },
-        y: { ticks:{color:'#4a7a9b',font:{family:'Share Tech Mono',size:10}, stepSize:1,
-             callback:(v)=>ips[v-1]||v}, grid:{color:'rgba(0,234,255,0.05)'} } },
-      plugins: { legend:{display:false},
+      pointBackgroundColor:'#00ff9f', pointRadius:5, fill:true, tension:0.4, borderWidth:2 }] },
+    options:{ responsive:true, maintainAspectRatio:true, animation:{duration:1000},
+      scales:{
+        x:{ticks:{color:'#4a7a9b',font:{family:'Share Tech Mono',size:10}},grid:{color:'rgba(0,234,255,0.05)'}},
+        y:{ticks:{color:'#4a7a9b',font:{family:'Share Tech Mono',size:10},stepSize:1,
+           callback:(v)=>ips[v-1]||v},grid:{color:'rgba(0,234,255,0.05)'}}},
+      plugins:{ legend:{display:false},
         tooltip:{ backgroundColor:'rgba(4,20,36,0.95)', titleColor:'#00eaff',
-          bodyColor:'#c8e4f0', borderColor:'rgba(0,234,255,0.2)', borderWidth:1,
-          callbacks:{ label:(ctx)=>` IP: ${ips[ctx.dataIndex]} (${history[ctx.dataIndex].provider})` } } } },
+          bodyColor:'#c8e4f0', callbacks:{label:(ctx)=>` IP: ${ips[ctx.dataIndex]}`} } } },
   });
 }
 
@@ -526,28 +694,20 @@ function renderIpHistory(history) {
    SSL / HTTP PANEL
 ═══════════════════════════════════════════ */
 function renderSslHttp(ssl, http) {
-  const grid = document.getElementById('sslHttpGrid');
-
-  const sslGrade = ssl.grade || 'N/A';
-  const gradeColor = { A:'ssl-val-ok', B:'ssl-val-ok', C:'ssl-val-warn', F:'ssl-val-bad', 'N/A':'ssl-val-warn' };
-  const gc = gradeColor[sslGrade] || 'ssl-val-warn';
-
-  const httpScore = http.security_score ?? null;
-  const httpCls   = httpScore >= 70 ? 'ssl-val-ok' : httpScore >= 40 ? 'ssl-val-warn' : 'ssl-val-bad';
-
-  // Security header tags
-  const present = http.present_security_headers || [];
-  const missing  = http.missing_security_headers || [];
-  const allHdrs  = [...present.map(h=>({h,ok:true})), ...missing.map(h=>({h,ok:false}))];
-
-  grid.innerHTML = `
+  const grid=document.getElementById('sslHttpGrid');
+  const sslGrade=ssl.grade||'N/A';
+  const gc={ A:'ssl-val-ok',B:'ssl-val-ok',C:'ssl-val-warn',F:'ssl-val-bad','N/A':'ssl-val-warn' }[sslGrade]||'ssl-val-warn';
+  const httpScore=http.security_score??null;
+  const httpCls=httpScore>=70?'ssl-val-ok':httpScore>=40?'ssl-val-warn':'ssl-val-bad';
+  const present=http.present_security_headers||[], missing=http.missing_security_headers||[];
+  const allHdrs=[...present.map(h=>({h,ok:true})),...missing.map(h=>({h,ok:false}))];
+  grid.innerHTML=`
     <div class="ssl-card">
       <div class="ssl-card-title">SSL / TLS</div>
       <div class="ssl-stat"><span>Valid</span><span class="${ssl.ssl_valid?'ssl-val-ok':'ssl-val-bad'}">${ssl.ssl_valid?'YES ✓':'NO ✗'}</span></div>
       <div class="ssl-stat"><span>Expired</span><span class="${ssl.ssl_expired?'ssl-val-bad':'ssl-val-ok'}">${ssl.ssl_expired?'YES ⚠':'NO ✓'}</span></div>
       <div class="ssl-stat"><span>Self-signed</span><span class="${ssl.self_signed?'ssl-val-bad':'ssl-val-ok'}">${ssl.self_signed?'YES ⚠':'NO ✓'}</span></div>
       <div class="ssl-stat"><span>Expires</span><span>${ssl.valid_until||'Unknown'}</span></div>
-      <div class="ssl-stat"><span>Days Left</span><span class="${(ssl.days_remaining||999)<30?'ssl-val-warn':'ssl-val-ok'}">${ssl.days_remaining!=null?ssl.days_remaining:'N/A'}</span></div>
       <div class="ssl-stat"><span>Grade</span><span class="${gc}">${sslGrade}</span></div>
     </div>
     <div class="ssl-card">
@@ -556,7 +716,7 @@ function renderSslHttp(ssl, http) {
       <div class="ssl-stat"><span>Security Score</span><span class="${httpCls}">${httpScore!=null?httpScore+'%':'N/A'}</span></div>
       <div class="ssl-stat"><span>HSTS</span><span class="${http.hsts?'ssl-val-ok':'ssl-val-bad'}">${http.hsts?'✓':'✗ Missing'}</span></div>
       <div class="ssl-stat"><span>CSP</span><span class="${http.csp?'ssl-val-ok':'ssl-val-bad'}">${http.csp?'✓':'✗ Missing'}</span></div>
-      <div class="ssl-stat"><span>CDN via header</span><span>${escapeHtml(http.cdn_via_header||'None')}</span></div>
+      <div class="ssl-stat"><span>CDN via Header</span><span>${escapeHtml(http.cdn_via_header||'None')}</span></div>
       <div class="header-tags">${allHdrs.map(({h,ok})=>`<span class="htag ${ok?'present':'missing'}">${h}</span>`).join('')}</div>
     </div>`;
 }
@@ -565,285 +725,130 @@ function renderSslHttp(ssl, http) {
    WHOIS TABLE
 ═══════════════════════════════════════════ */
 function renderWhois(w) {
-  const tbl = document.getElementById('whoisTable');
-  const rows = [
-    ['Registrar',    w.registrar     || '—'],
-    ['Org',          w.org           || '—'],
-    ['Country',      w.country       || '—'],
-    ['Created',      w.creation_date || '—'],
-    ['Expires',      w.expiry_date   || '—'],
-    ['DNSSEC',       w.dnssec        || '—'],
-    ['Name Servers', (w.name_servers||[]).join('\n') || '—'],
+  const tbl=document.getElementById('whoisTable');
+  const rows=[
+    ['Registrar',w.registrar||'—'],['Org',w.org||'—'],['Country',w.country||'—'],
+    ['Created',w.creation_date||'—'],['Expires',w.expiry_date||'—'],
+    ['DNSSEC',w.dnssec||'—'],['Name Servers',(w.name_servers||[]).join('\n')||'—'],
   ];
-  tbl.innerHTML = rows.map(([k,v]) =>
-    `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`
-  ).join('');
+  tbl.innerHTML=rows.map(([k,v])=>`<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`).join('');
 }
 
 /* ════════════════════════════════════════════
    GEO-IP
 ═══════════════════════════════════════════ */
-function renderGeoIp(geo) {
-  const el = document.getElementById('geoInfo');
-  const countryEmojis = { US:'🇺🇸',GB:'🇬🇧',DE:'🇩🇪',FR:'🇫🇷',CN:'🇨🇳',RU:'🇷🇺',
-    IN:'🇮🇳',JP:'🇯🇵',BR:'🇧🇷',CA:'🇨🇦',AU:'🇦🇺',SG:'🇸🇬',NL:'🇳🇱',KP:'🇰🇵',
-    IR:'🇮🇷',NG:'🇳🇬',BY:'🇧🇾',UA:'🇺🇦' };
-  const flag = countryEmojis[geo.country_code] || '🌍';
-  const flaggedHtml = geo.is_flagged_region
-    ? `<div class="geo-flagged">⚠ ${escapeHtml(geo.risk_note || 'Flagged region detected')}</div>`
-    : `<div class="geo-clean">✓ Geographic origin within normal parameters</div>`;
-  el.innerHTML = `
-    <div class="geo-country">
-      <div class="geo-flag">${flag}</div>
-      <div>
-        <div class="geo-country-name">${escapeHtml(geo.primary_country || 'Unknown')}</div>
-        <div class="geo-country-code">${geo.country_code || '?'} · ${geo.geo_source || 'WHOIS'}</div>
-      </div>
-    </div>
-    ${flaggedHtml}`;
+function renderGeoIp(geo, region) {
+  const el=document.getElementById('geoInfo');
+  const flags={US:'🇺🇸',GB:'🇬🇧',DE:'🇩🇪',FR:'🇫🇷',CN:'🇨🇳',RU:'🇷🇺',IN:'🇮🇳',JP:'🇯🇵',
+    BR:'🇧🇷',CA:'🇨🇦',AU:'🇦🇺',SG:'🇸🇬',NL:'🇳🇱',KP:'🇰🇵',IR:'🇮🇷',NG:'🇳🇬',BY:'🇧🇾',UA:'🇺🇦'};
+  const flag=flags[geo.country_code]||'🌍';
+  let flaggedHtml = '';
+  if (region && region.risk_level) {
+    let col = region.risk_level.includes('High') ? 'var(--accent-magenta)' : 'var(--green)';
+    flaggedHtml = `<div style="margin-top:8px; font-size:12px; font-family:'Share Tech Mono';">Threat Region: <span style="color:${col};">${region.risk_level}</span></div>`;
+  }
+  if (!flaggedHtml) {
+      flaggedHtml=geo.is_flagged_region
+        ?`<div class="geo-flagged">⚠ ${escapeHtml(geo.risk_note||'Flagged region')}</div>`
+        :`<div class="geo-clean">✓ Geographic origin within normal parameters</div>`;
+  }
+  el.innerHTML=`<div class="geo-country">
+    <div class="geo-flag">${flag}</div>
+    <div><div class="geo-country-name">${escapeHtml(geo.primary_country||'Unknown')}</div>
+    <div class="geo-country-code">${geo.country_code||'?'} · ${geo.geo_source||'WHOIS'}</div></div>
+  </div>${flaggedHtml}`;
 }
 
 /* ════════════════════════════════════════════
-   URL PATTERN ANALYSIS
+   URL ANALYSIS
 ═══════════════════════════════════════════ */
-function renderUrlAnalysis(url) {
-  const el = document.getElementById('urlInfo');
-  const flags = url.flags || [];
-  const score = url.phishing_score || 0;
-  const scoreColor = score >= 60 ? 'var(--red)' : score >= 30 ? 'var(--yellow)' : 'var(--green)';
-  el.innerHTML = `
-    <div class="url-stat-row"><span>URL Length</span><span>${url.url_length || 0} chars</span></div>
-    <div class="url-stat-row"><span>TLD</span><span style="color:${url.suspicious_tld?'var(--red)':'var(--green)'}">${url.tld || 'N/A'} ${url.suspicious_tld?'⚠':''}</span></div>
-    <div class="url-stat-row"><span>Subdomain Depth</span><span>${url.subdomain_depth || 0}</span></div>
+function renderUrlAnalysis(url, lookalike) {
+  const el=document.getElementById('urlInfo');
+  const score=url.phishing_score||0;
+  const scoreColor=score>=60?'var(--red)':score>=30?'var(--yellow)':'var(--green)';
+  const flags=url.flags||[];
+  let lHtml = '';
+  if (lookalike && lookalike.is_lookalike) {
+      lHtml = `<div class="url-stat-row" style="color:var(--accent-magenta); font-weight:bold; margin-top:8px;">[!] LOOK-ALIKE MATCH: ${lookalike.matched_domain} (${lookalike.similarity_score}%)</div>`;
+  } else if (lookalike && lookalike.matched_domain !== "None") {
+      lHtml = `<div class="url-stat-row" style="color:var(--yellow); font-weight:bold; margin-top:8px;">Anti-Phishing Match: ${lookalike.matched_domain}</div>`;
+  }
+  
+  el.innerHTML=`
+    <div class="url-stat-row"><span>URL Length</span><span>${url.url_length||0} chars</span></div>
+    <div class="url-stat-row"><span>TLD</span><span style="color:${url.suspicious_tld?'var(--red)':'var(--green)'}">${url.tld||'N/A'} ${url.suspicious_tld?'⚠':''}</span></div>
+    <div class="url-stat-row"><span>Subdomain Depth</span><span>${url.subdomain_depth||0}</span></div>
     <div class="url-stat-row"><span>Phishing Score</span><span style="color:${scoreColor};font-weight:700">${score}/100</span></div>
     <div class="phishing-score-bar"><div class="phishing-score-fill" style="width:${score}%"></div></div>
-    ${flags.length ? `<div class="url-flags">${flags.map(f=>`<div class="url-flag-item">${escapeHtml(f)}</div>`).join('')}</div>` : ''}`;
+    ${flags.length?`<div class="url-flags">${flags.map(f=>`<div class="url-flag-item">${escapeHtml(f)}</div>`).join('')}</div>`:''}${lHtml}`;
 }
 
 /* ════════════════════════════════════════════
    THREAT INTEL
 ═══════════════════════════════════════════ */
 function renderThreatIntel(t) {
-  const vt  = t.virustotal_flags || 0;
-  const blk = t.blacklist_hits   || 0;
-  document.getElementById('vtNum').textContent = vt;
-  document.getElementById('blNum').textContent = blk;
-  setTimeout(() => {
-    document.getElementById('vtBar').style.width  = Math.min(100, vt  * 10) + '%';
-    document.getElementById('blBar').style.width  = Math.min(100, blk * 15) + '%';
-  }, 400);
-  const total = vt + blk;
-  let statusText, col;
-  if      (total === 0) { statusText = '✅ Clear — No threats detected';         col = '#00ff9f'; }
-  else if (total <= 3)  { statusText = '⚠ Low threat signals found';             col = '#ffd166'; }
-  else                  { statusText = '🚨 HIGH THREAT — Multiple detections!';  col = '#ff4f6d'; }
-  const el = document.getElementById('threatStatus');
-  el.textContent = statusText; el.style.color = col;
-  if (vt  > 5)  document.getElementById('vtNum').style.color  = '#ff4f6d';
-  else if (vt  > 0) document.getElementById('vtNum').style.color = '#ffd166';
-  if (blk > 3)  document.getElementById('blNum').style.color = '#ff4f6d';
-  else if (blk > 0) document.getElementById('blNum').style.color = '#ffd166';
+  const vt=t.virustotal_flags||0, blk=t.blacklist_hits||0;
+  document.getElementById('vtNum').textContent=vt;
+  document.getElementById('blNum').textContent=blk;
+  setTimeout(()=>{
+    document.getElementById('vtBar').style.width=Math.min(100,vt*10)+'%';
+    document.getElementById('blBar').style.width=Math.min(100,blk*15)+'%';
+  },400);
+  const total=vt+blk;
+  let txt,col;
+  if(total===0){txt='✅ Clear — No threats detected';col='#00ff9f';}
+  else if(total<=3){txt='⚠ Low threat signals found';col='#ffd166';}
+  else{txt='🚨 HIGH THREAT — Multiple detections!';col='#ff4f6d';}
+  const el=document.getElementById('threatStatus');
+  el.textContent=txt; el.style.color=col;
+  if(vt>5)document.getElementById('vtNum').style.color='#ff4f6d';
+  else if(vt>0)document.getElementById('vtNum').style.color='#ffd166';
+  if(blk>3)document.getElementById('blNum').style.color='#ff4f6d';
+  else if(blk>0)document.getElementById('blNum').style.color='#ffd166';
 }
 
 /* ════════════════════════════════════════════
-   PDF REPORT  (v3.0 — full forensic report)
+   PDF REPORT  (v4.0 — all new sections)
 ═══════════════════════════════════════════ */
-function downloadReport() {
+async function downloadReport() {
   if (!currentReport) { alert('Run a scan first!'); return; }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit:'mm', format:'a4' });
-  const d   = currentReport;
-  const LM  = 15, RW = 180;
-  let y     = 18;
-
-  doc.setFillColor(2, 12, 18);
-  doc.rect(0, 0, 210, 297, 'F');
-
-  doc.setFontSize(20); doc.setTextColor(0, 234, 255); doc.setFont('helvetica','bold');
-  doc.text('HostTrace AI — Forensic Report v3.0', LM, y); y += 8;
-
-  doc.setFontSize(8.5); doc.setTextColor(74, 122, 155); doc.setFont('helvetica','normal');
-  doc.text(`Trace ID: ${d.trace_id || '—'}   |   Report ID: ${d.report_id || '—'}   |   ${d.scan_timestamp}`, LM, y); y += 8;
-
-  doc.setDrawColor(0, 234, 255); doc.setLineWidth(0.4);
-  doc.line(LM, y, LM + RW, y); y += 8;
-
-  function section(title) {
-    if (y > 265) { doc.addPage(); doc.setFillColor(2,12,18); doc.rect(0,0,210,297,'F'); y = 18; }
-    doc.setFontSize(10); doc.setTextColor(0,255,159); doc.setFont('helvetica','bold');
-    doc.text(title, LM, y); y += 6;
+  try {
+    const res = await fetch(`${API_BASE}/download-pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentReport)
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        alert('Failed to generate PDF: ' + text);
+        return;
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = `HostTrace_Report_${currentReport.domain}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    a.remove();
+  } catch (err) {
+    alert('Error generating PDF: ' + err.message);
   }
-  function row(label, value, valColor) {
-    if (y > 275) { doc.addPage(); doc.setFillColor(2,12,18); doc.rect(0,0,210,297,'F'); y = 18; }
-    doc.setFontSize(8.5); doc.setTextColor(200,228,240); doc.setFont('helvetica','bold');
-    doc.text(label + ':', LM, y);
-    if (valColor) doc.setTextColor(...valColor); else doc.setTextColor(180,210,230);
-    doc.setFont('helvetica','normal');
-    const lines = doc.splitTextToSize(String(value||'—'), 118);
-    doc.text(lines, LM + 54, y);
-    y += lines.length * 5 + 1.5;
-    doc.setTextColor(200,228,240);
-  }
-
-  // ── Domain ──
-  section('DOMAIN INFORMATION');
-  row('Domain',       d.domain);
-  row('IP Addresses', (d.ip_addresses||[]).join(', '));
-  row('Scan Time',    d.scan_timestamp);
-  y += 3;
-
-  // ── Final Verdict ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('FINAL VERDICT');
-  const v = d.verdict || {};
-  const vcol = v.status==='SAFE'?[0,255,159]:v.status==='HIGH RISK'?[255,79,109]:[255,209,102];
-  row('Status',       v.badge || v.status, vcol);
-  row('Confidence',   (v.confidence||0)+'%');
-  row('Assessment',   v.note || '—');
-  row('Trace ID',     d.trace_id || '—');
-  y += 3;
-
-  // ── Proxy ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('PROXY / CDN DETECTION');
-  row('Proxy Detected',  d.proxy_detected ? 'YES' : 'NO', d.proxy_detected?[255,79,109]:[0,255,159]);
-  row('Proxy Provider',  d.proxy_provider  || 'N/A');
-  row('CDN Detected',    d.cdn_detected ? 'YES' : 'NO',  d.cdn_detected?[255,209,102]:[0,255,159]);
-  row('CDN Provider',    d.cdn_provider    || 'N/A');
-  row('Masking Level',   d.masking_level   || '—');
-  y += 3;
-
-  // ── Hosting ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('AI HOSTING PREDICTION');
-  row('Real Hosting',    d.real_hosting);
-  if (d.possible_hosting) row('Possible Hosting', d.possible_hosting + ' (low confidence, behind proxy)');
-  row('Confidence',      d.confidence + '%');
-  y += 3;
-
-  // ── Risk Breakdown ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('RISK ASSESSMENT & BREAKDOWN');
-  row('Risk Score',  d.risk_score + '/100');
-  row('Risk Level',  d.risk_level);
-  const rb = d.risk_breakdown || {};
-  const rbItems = [
-    ['Proxy Risk',       rb.proxy_risk],
-    ['Blacklist Hits',   rb.blacklist_hits],
-    ['Suspicious TLD',   rb.suspicious_tld],
-    ['New Domain',       rb.new_domain],
-    ['Trusted Registrar',rb.trusted_registrar],
-    ['Clean Threat Intel',rb.clean_threat_intel],
-  ];
-  for (const [k,v2] of rbItems) {
-    if (v2 !== undefined && v2 !== 0) row(k, (v2>0?'+':'')+v2);
-  }
-  y += 3;
-
-  // ── SSL ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('SSL / TLS ANALYSIS');
-  const ssl = d.ssl_analysis || {};
-  row('SSL Valid',    ssl.ssl_valid ? 'YES' : 'NO', ssl.ssl_valid?[0,255,159]:[255,79,109]);
-  row('Expired',      ssl.ssl_expired ? 'YES ⚠' : 'NO');
-  row('Self-signed',  ssl.self_signed ? 'YES ⚠' : 'NO');
-  row('Grade',        ssl.grade || 'N/A');
-  row('Expires',      ssl.valid_until || 'Unknown');
-  row('Days Left',    ssl.days_remaining != null ? String(ssl.days_remaining) : 'N/A');
-  if (ssl.error) row('Error', ssl.error);
-  y += 3;
-
-  // ── HTTP Headers ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('HTTP SECURITY HEADERS');
-  const http = d.http_analysis || {};
-  row('Security Score', (http.security_score ?? 'N/A')+'%');
-  row('HSTS',     http.hsts  ? 'Present ✓' : 'Missing ⚠');
-  row('CSP',      http.csp   ? 'Present ✓' : 'Missing ⚠');
-  row('Server',   http.server || 'Unknown');
-  if (http.missing_security_headers && http.missing_security_headers.length)
-    row('Missing Headers', http.missing_security_headers.join(', '));
-  if (http.cdn_via_header) row('CDN via Header', http.cdn_via_header);
-  y += 3;
-
-  // ── GeoIP ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('GEO-IP ANALYSIS');
-  const geo = d.geo_analysis || {};
-  row('Country',        geo.primary_country || 'Unknown');
-  row('Country Code',   geo.country_code    || '?');
-  row('Flagged Region', geo.is_flagged_region ? 'YES ⚠' : 'NO ✓', geo.is_flagged_region?[255,79,109]:[0,255,159]);
-  if (geo.risk_note) row('Note', geo.risk_note);
-  y += 3;
-
-  // ── URL Analysis ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('URL PATTERN ANALYSIS');
-  const url = d.url_analysis || {};
-  row('URL Length',      url.url_length || 0);
-  row('TLD',             url.tld || 'N/A');
-  row('Suspicious TLD',  url.suspicious_tld ? 'YES ⚠' : 'NO ✓');
-  row('Phishing Score',  (url.phishing_score || 0)+'/100');
-  if (url.suspicious_keywords && url.suspicious_keywords.length)
-    row('Suspicious Keywords', url.suspicious_keywords.join(', '));
-  y += 3;
-
-  // ── WHOIS ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('WHOIS FORENSICS');
-  const w = d.whois || {};
-  row('Registrar',    w.registrar);
-  row('Organization', w.org);
-  row('Country',      w.country);
-  row('Created',      w.creation_date);
-  row('Expires',      w.expiry_date);
-  row('DNSSEC',       w.dnssec);
-  row('Name Servers', (w.name_servers||[]).join(', '));
-  y += 3;
-
-  // ── Attack Surface ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('ATTACK SURFACE SUMMARY');
-  const atk = d.attack_surface || {};
-  for (const [key, label] of [['proxy_layer','Proxy Layer'],['dns_strength','DNS Strength'],['threat_footprint','Threat Footprint'],['exposure_level','Exposure Level']]) {
-    if (atk[key]) row(label, `${atk[key].status} — ${atk[key].detail}`);
-  }
-  y += 3;
-
-  // ── Threat Intel ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('THREAT INTELLIGENCE');
-  row('VirusTotal Flags', d.threat_intel?.virustotal_flags ?? 0);
-  row('Blacklist Hits',   d.threat_intel?.blacklist_hits   ?? 0);
-  y += 3;
-
-  // ── Explanation ──
-  doc.line(LM,y,LM+RW,y); y+=6;
-  section('AI EXPLANATION LOG');
-  for (const exp of (d.explanation||[])) {
-    if (y > 275) { doc.addPage(); doc.setFillColor(2,12,18); doc.rect(0,0,210,297,'F'); y=18; }
-    doc.setFontSize(8.5); doc.setTextColor(74,122,155); doc.setFont('helvetica','normal');
-    const lines = doc.splitTextToSize(`• ${exp}`, RW);
-    doc.text(lines, LM+4, y); y += lines.length*4.5+1;
-  }
-
-  doc.setFontSize(7); doc.setTextColor(40,80,100);
-  doc.text(`HostTrace AI © 2025 — For authorized security research only | Trace: ${d.trace_id||'—'}`, LM, 290);
-
-  doc.save(`hosttrace_${d.domain}_${d.trace_id||Date.now()}.pdf`);
 }
 
 /* ════════════════════════════════════════════
    UTILITIES
 ═══════════════════════════════════════════ */
 function shakeInput() {
-  const box = document.getElementById('searchBox');
-  box.style.animation = 'none'; box.offsetHeight;
-  box.style.animation = 'shake 0.4s ease';
-  box.addEventListener('animationend', () => { box.style.animation=''; }, { once:true });
+  const box=document.getElementById('searchBox');
+  box.style.animation='none'; box.offsetHeight;
+  box.style.animation='shake 0.4s ease';
+  box.addEventListener('animationend',()=>{box.style.animation='';},{once:true});
 }
-const shakeStyle = document.createElement('style');
-shakeStyle.textContent = `@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}`;
+const shakeStyle=document.createElement('style');
+shakeStyle.textContent=`@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}`;
 document.head.appendChild(shakeStyle);
 
 function escapeHtml(str) {
@@ -851,3 +856,141 @@ function escapeHtml(str) {
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/\n/g,'<br>');
 }
+
+/* ════════════════════════════════════════════
+   v7.0 LIVE THREAT DASHBOARD (ML)
+═══════════════════════════════════════════ */
+let globalScanHistory = [];
+let dashPieChart, dashLineChart, dashBarChart;
+
+function updateDashboard(data) {
+  const v = data.verdict || {};
+  const pred = data.ai_prediction || {};
+  const acc = (pred.accuracy || 0).toFixed(1) + '%';
+  const confidence = (pred.confidence || 0).toFixed(1) + '%';
+  const ml_class = pred.prediction || v.status || 'UNKNOWN';
+
+  // 1. Maintain History
+  globalScanHistory.push({
+    domain: data.domain,
+    risk: data.risk_score || 0,
+    pred: ml_class,
+    conf: confidence,
+    acc: acc
+  });
+  
+  // 2. Render Table
+  const tbody = document.getElementById('historyTableBody');
+  tbody.innerHTML = globalScanHistory.map(h => {
+    let color = h.pred === 'SAFE' ? '#00ff9f' : (h.pred === 'SUSPICIOUS' ? '#ffd166' : '#ff4f6d');
+    return `<tr style="border-bottom: 1px solid var(--border); background: rgba(0,0,0,0.2);">
+      <td style="padding: 6px;">${h.domain}</td>
+      <td style="padding: 6px;">${h.risk}</td>
+      <td style="padding: 6px; color: ${color}; font-weight: bold;">${h.pred}</td>
+      <td style="padding: 6px;">${h.conf}</td>
+      <td style="padding: 6px;">${h.acc}</td>
+    </tr>`;
+  }).join('');
+
+  // 3. Render Pie Chart (Safe/Susp/Danger Distribution overall)
+  const pieCtx = document.getElementById('dashPieChart');
+  let safe=0, susp=0, danger=0;
+  globalScanHistory.forEach(h => {
+    if (h.pred === 'SAFE') safe++;
+    else if (h.pred === 'SUSPICIOUS') susp++;
+    else danger++;
+  });
+  if (dashPieChart) dashPieChart.destroy();
+  dashPieChart = new Chart(pieCtx, {
+    type: 'pie',
+    data: {
+      labels: ['Safe', 'Suspicious', 'Dangerous'],
+      datasets: [{
+        data: [safe, susp, danger],
+        backgroundColor: ['#00ff9f', '#ffd166', '#ff4f6d'],
+        borderWidth: 1, borderColor: '#061624'
+      }]
+    },
+    options: { responsive: true, plugins: { legend: { labels: { color: 'white' } } } }
+  });
+
+  // 4. Render Line Chart (Risk Trend)
+  const lineCtx = document.getElementById('dashLineChart');
+  if (dashLineChart) dashLineChart.destroy();
+  dashLineChart = new Chart(lineCtx, {
+    type: 'line',
+    data: {
+      labels: globalScanHistory.map((_, i) => '#' + (i+1)),
+      datasets: [{
+        label: 'Risk Score Over Time',
+        data: globalScanHistory.map(h => h.risk),
+        borderColor: '#00eaff',
+        backgroundColor: 'rgba(0,234,255,0.1)',
+        tension: 0.4, fill: true
+      }]
+    },
+    options: { responsive: true, scales: { y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.1)' } } }, plugins: { legend: { labels: { color: 'white' } } } }
+  });
+
+  // 5. Render Bar Chart (Feature Importance for THIS scan)
+  const barCtx = document.getElementById('dashBarChart');
+  const features = data.features || {};
+  if (dashBarChart) dashBarChart.destroy();
+  dashBarChart = new Chart(barCtx, {
+    type: 'bar',
+    data: {
+      labels: Object.keys(features),
+      datasets: [{
+        label: 'Raw Feature Metric',
+        data: Object.values(features),
+        backgroundColor: '#bc5af7'
+      }]
+    },
+    options: { recursive: true, indexAxis: 'y', scales: { x: { grid: { color: 'rgba(255,255,255,0.1)' } } }, plugins: { legend: { labels: { color: 'white' } } } }
+  });
+}
+
+/* ════════════════════════════════════════════
+   v8.0 DATA RENDERING
+═══════════════════════════════════════════ */
+function renderV8Modules(data) {
+  // 1. Phishing Simulation
+  const phish = data.phish_sim || {};
+  let phtml = `<div style="font-size:13px; margin-bottom:8px;">Harvesting Behavior Probability: <strong style="color:var(--accent-cyan);">${phish.phishing_probability||0}%</strong></div>`;
+  let pcol = phish.behavior_classification === 'HIGH RISK PHISHING' ? 'var(--accent-magenta)' : (phish.behavior_classification === 'SAFE' ? 'var(--green)' : 'var(--yellow)');
+  phtml += `<div style="font-weight:bold; color:${pcol};">[ ${phish.behavior_classification || 'UNKNOWN'} ]</div>`;
+  document.getElementById('phishSimContent').innerHTML = phtml;
+
+  // 2. Domain DNA
+  const dna = data.domain_dna || {};
+  let dhtml = `<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Structure:</span> <span>${dna.structure_type||'—'}</span></div>`;
+  dhtml += `<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Entropy:</span> <span>${dna.entropy_level||'—'}</span></div>`;
+  dhtml += `<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Behavior:</span> <span>${dna.behavioral_pattern||'—'}</span></div>`;
+  dhtml += `<hr style="border-color:var(--border); margin:8px 0;"/><div style="display:flex; justify-content:space-between; font-weight:bold;"><span>DNA Score:</span> <span style="color:var(--accent-cyan);">${dna.summary_score||0}/10</span></div>`;
+  document.getElementById('dnaContent').innerHTML = dhtml;
+
+  // 3. XAI Explainable AI
+  const xai = data.xai_signals || [];
+  let xhtml = '';
+  xai.forEach(s => {
+    let clr = s.signal === 'Positive' ? 'var(--green)' : 'var(--accent-magenta)';
+    xhtml += `<div style="border-left: 2px solid ${clr}; padding-left: 10px; margin-bottom: 8px; font-size:12px;">`;
+    xhtml += `<div style="color:${clr}; font-weight:bold; font-family:'Share Tech Mono';">${s.feature} [${s.impact}]</div>`;
+    xhtml += `<div style="color:var(--muted);">${s.desc}</div>`;
+    xhtml += `</div>`;
+  });
+  if(!xhtml) xhtml = '<div class="muted">No prominent localized features evaluated.</div>';
+  document.getElementById('xaiGrid').innerHTML = xhtml;
+
+  // 4. Threat Alerts
+  const alerts = data.threat_alerts || [];
+  let ahtml = '';
+  alerts.forEach(a => {
+    let clr = a.level === 'CRITICAL' ? 'var(--accent-magenta)' : (a.level === 'WARNING' ? 'var(--yellow)' : 'var(--accent-cyan)');
+    ahtml += `<div style="background:rgba(0,0,0,0.3); border:1px solid ${clr}; padding:8px; margin-bottom:8px; border-radius:4px; font-size:12px;">`;
+    ahtml += `<strong style="color:${clr};">${a.level}</strong>: ${a.msg}`;
+    ahtml += `</div>`;
+  });
+  document.getElementById('threatAlertsList').innerHTML = ahtml;
+}
+
