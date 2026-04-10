@@ -157,7 +157,7 @@ def analyze_redirect_chain(domain: str) -> dict:
         total_hops     — length of chain
     """
     chain:   list = []
-    url:     str  = f"https://{domain}"
+    url:     str  = domain if domain.startswith("http") else f"https://{domain}"
     visited: set  = set()
     MAX_HOPS      = 8
     tried_http    = False
@@ -209,7 +209,7 @@ def analyze_redirect_chain(domain: str) -> dict:
             # Try HTTP fallback on first HTTPS failure
             if hop == 0 and url.startswith("https://") and not tried_http:
                 tried_http = True
-                url = f"http://{domain}"
+                url = url.replace("https://", "http://", 1)
                 continue
             chain.append({
                 "hop":   hop + 1,
@@ -225,6 +225,6 @@ def analyze_redirect_chain(domain: str) -> dict:
     return {
         "chain":          chain,
         "redirect_count": redirect_count,
-        "suspicious":     redirect_count > 2,
+        "suspicious":     redirect_count > 3,
         "total_hops":     len(chain),
     }

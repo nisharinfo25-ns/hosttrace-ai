@@ -58,12 +58,15 @@ def calculate_risk(
 
     rb = {
         "proxy_risk":         0,
+        "cdn_risk":           0,
+        "proxy_headers":      0,
         "hidden_origin":      0,
         "blacklist_hits":     0,
         "suspicious_tld":     0,
         "new_domain":         0,
         "login_keywords":     0,
         "redirect_chain":     0,
+        "suspicious_dns":     0,
         "geo_mismatch":       0,
         "hosting_mismatch":   0,
         "trusted_registrar":  0,
@@ -72,9 +75,17 @@ def calculate_risk(
         "url_pattern_risk":   0,
     }
 
-    # ── 1. Proxy Risk (+10) ───────────────────────────────────
-    if proxy_info.get("proxy_detected") or proxy_info.get("cdn_detected"):
-        factors.append("INFO: CDN protection detected — used for security, caching, and DDoS mitigation.")
+    # ── 1. Proxy Risk ───────────────────────────────────
+    if proxy_info.get("cdn_detected"):
+        pts = 20; risk += pts; rb["cdn_risk"] = pts
+        factors.append(f"CDN protection detected (+{pts})")
+    elif proxy_info.get("proxy_detected"):
+        pts = 20; risk += pts; rb["proxy_risk"] = pts
+        factors.append(f"Reverse proxy detected (+{pts})")
+        
+    if proxy_info.get("proxy_indicators"):
+        pts = 20; risk += pts; rb["proxy_headers"] = pts
+        factors.append(f"Proxy indicators in HTTP headers (+{pts})")
         
     # ── 2. Hidden Origin (+20) ── NEW ───────────────────────────
     if origin_discovery and origin_discovery.get("origin_suspected"):
@@ -85,6 +96,10 @@ def calculate_risk(
             factors.append(
                 f"Backend infrastructure mapping (informational) — {n} possible IP(s) detected"
             )
+    
+    if proxy_info.get("origin_hidden"):
+        pts = 20; risk += pts; rb["hidden_origin"] = pts
+        factors.append(f"Hidden origin signals — origin IP shielded (+{pts})")
 
     # ── 3. Blacklist / VT hits ─────────────────────────────────
     blk = threat.get("blacklist_hits", 0)
@@ -148,7 +163,7 @@ def calculate_risk(
     if redirect_chain and redirect_chain.get("suspicious"):
         pts = 10; risk += pts; rb["redirect_chain"] = pts
         cnt = redirect_chain.get("redirect_count", 0)
-        factors.append(f"Suspicious redirect chain — {cnt} redirects detected (+{pts})")
+        factors.append(f"Suspicious redirect chain — {cnt} redirects detected (>3 hops) (+{pts})")
 
     # ── 8. Geo Mismatch (+10) ── NEW ───────────────────────────
     if geo_info and geo_info.get("is_flagged_region"):
@@ -161,7 +176,7 @@ def calculate_risk(
     if asn_analysis and asn_analysis.get("mismatch_detected"):
         pts = 15; risk += pts; rb["hosting_mismatch"] = pts
         factors.append(
-            f"Hosting provider mismatch: {asn_analysis.get('mismatch_note','')} (+{pts})"
+            f"Hosting provider/ASN mismatch detected (+{pts})"
         )
 
     # ── 10. WHOIS org redacted ─────────────────────────────────
@@ -194,9 +209,12 @@ def calculate_risk(
                 risk += 30; rb["ssl_risk"] += 30
                 factors.append("No valid SSL detected (+30)")
 
-    # ── 14. DNS failures ───────────────────────────────────────
+    # ── 14. DNS failures & Suspicious Patterns ─────────────────
     if len(dns_info.get("ip_addresses", [])) == 0:
         risk += 20; factors.append("DNS resolution failed (+20)")
+    elif dns_info.get("ttl_hint") == "Short (Anycast / CDN optimised)" and not proxy_info.get("cdn_detected"):
+        pts = 15; risk += pts; rb["suspicious_dns"] = pts
+        factors.append(f"Suspicious DNS pattern without known CDN (+{pts})")
 
     # ── 15. Known-legit correction ─────────────────────────────
     if legit and risk > 30:
@@ -219,14 +237,14 @@ def calculate_risk(
     final_risk = min(100, max(0, final_risk))
     risk = final_risk
     
-    if final_risk >= 71:
+    if final_risk >= 61:
         severity = "HIGH"
     elif risk >= 31:
         severity = "MEDIUM"
     else:
         severity = "LOW"
 
-    level = "Low" if risk <= 30 else ("Medium" if risk <= 60 else "High")
+    level = "Low Risk" if risk <= 30 else ("Medium Risk" if risk <= 60 else "High Risk")
 
     return {
         "risk_score":     int(risk),

@@ -18,7 +18,10 @@ from flask import Flask, request, jsonify, render_template, send_file
 from flask_cors import CORS
 import socket, time, re, ipaddress, sys, os, ssl, random, string
 from datetime import datetime
+from urllib.parse import urlparse
 import threading
+from dotenv import load_dotenv
+load_dotenv()
 
 # ── Set global socket timeout ─────────────────────────────────
 socket.setdefaulttimeout(15)
@@ -61,8 +64,8 @@ from utils.analyzer import (
     generate_ai_confidence, build_risk_explanation,
     build_infrastructure_map, is_enterprise_registrar,
 )
-from utils.ml_engine import append_and_train
-from utils.report_generator import generate_pdf_report
+from utils.ml_engine import append_and_train, predict_risk, generate_local_explanation
+from utils.report_generator import generate_pdf_report, generate_text_report, generate_word_report
 import utils.anti_phishing as anti_phishing
 import utils.xai_module as xai_module
 
@@ -75,6 +78,27 @@ CORS(app)
 # ══════════════════════════════════════════════════════════════
 # HELPERS (local, used for small utilities)
 # ══════════════════════════════════════════════════════════════
+
+def generate_risk_explanation(
+    domain: str,
+    risk_score: int,
+    prediction: str,
+    flags,
+    features: dict = None,
+) -> dict:
+    """
+    Generates a plain-English risk explanation using the fully local
+    rule-based XAI engine in ml_engine.py.  Zero network calls.
+    Always returns a valid string.
+    """
+    return generate_local_explanation(
+        domain=domain,
+        risk_score=risk_score,
+        prediction=prediction,
+        features=features or {},
+        flags=flags or [],
+    )
+
 def generate_trace_id(domain: str) -> str:
     seed = sum(ord(c) for c in domain)
     random.seed(seed + int(time.time() // 3600))
@@ -241,12 +265,29 @@ def analyze_http_headers(domain: str) -> dict:
             via     = headers.get("via", "")
             cf_ray  = headers.get("cf-ray", "")
             x_cache = headers.get("x-cache", "")
-            if cf_ray:
-                result["cdn_via_header"] = "Cloudflare (cf-ray header present)"
+            cf_cache_status = headers.get("cf-cache-status", "")
+            x_forwarded_for = headers.get("x-forwarded-for", "")
+            x_real_ip = headers.get("x-real-ip", "")
+            proxy_headers = []
+            
+            if cf_ray or cf_cache_status:
+                result["cdn_via_header"] = "Cloudflare (cf-ray / cf-cache-status)"
+                proxy_headers.append(f"cf-ray: {cf_ray}" if cf_ray else "cf-cache-status present")
             elif "akamai" in via.lower():
                 result["cdn_via_header"] = "Akamai (via header)"
-            elif "varnish" in x_cache.lower():
+                proxy_headers.append(f"via: {via}")
+            elif "varnish" in x_cache.lower() or "fastly" in via.lower():
                 result["cdn_via_header"] = "Fastly/Varnish (x-cache header)"
+                proxy_headers.append(f"x-cache: {x_cache}")
+            elif "cloudfront" in via.lower() or headers.get("x-amz-cf-id"):
+                result["cdn_via_header"] = "AWS CloudFront"
+                proxy_headers.append("x-amz-cf-id / via cloudfront")
+
+            if x_forwarded_for: proxy_headers.append(f"x-forwarded-for: {x_forwarded_for}")
+            if x_real_ip: proxy_headers.append(f"x-real-ip: {x_real_ip}")
+            if result["server"] in ["cloudflare", "AkamaiGHost"]: proxy_headers.append(f"server: {result['server']}")
+            
+            result["proxy_headers"] = proxy_headers
             score = 0
             for hname, label in SECURITY_HEADERS:
                 if hname.lower() in headers:
@@ -269,6 +310,7 @@ def analyze_http_headers(domain: str) -> dict:
                 headers = {k.lower(): v for k, v in resp.headers.items()}
                 result["headers_fetched"] = True
                 result["server"] = headers.get("server", "Unknown")
+                result["proxy_headers"] = []
                 result["missing_security_headers"] = [
                     label for _, label in SECURITY_HEADERS
                     if _.lower() not in headers]
@@ -697,18 +739,41 @@ def health():
 @app.route("/scan", methods=["POST", "GET"])
 def analyze_domain():
     data   = request.get_json(silent=True) or {}
-    domain = data.get("domain", "").strip().lower()
+    raw_domain = data.get("domain", "").strip().lower()
     
-    # 5-minute TTL cache
-    cached = SCAN_CACHE.get(domain)
-    if cached and (time.time() - cached['time'] < 300):
-        print(f"[*] Returning cached result for {domain}")
-        return jsonify(cached['response'])
-    domain = re.sub(r"^https?://", "", domain)
-    domain = re.sub(r"/.*$",       "", domain)
+    if not raw_domain or len(raw_domain) < 3:
+        return jsonify({"error": "Please provide a valid domain name or IP"}), 400
 
+    # 5-minute TTL cache on raw input
+    cached = SCAN_CACHE.get(raw_domain)
+    if cached and (time.time() - cached['time'] < 300):
+        print(f"[*] Returning cached result for {raw_domain}")
+        return jsonify(cached['response'])
+
+    # ── Canonicalize Input ──
+    print(f"[*] Canonicalizing input: {raw_domain}")
+    try:
+        ipaddress.ip_address(raw_domain)
+        domain = raw_domain
+        is_ip = True
+        redirect_chain = {"chain": [], "redirect_count": 0, "suspicious": False, "total_hops": 0}
+    except ValueError:
+        is_ip = False
+        redirect_chain = analyze_redirect_chain(raw_domain)
+        final_url = redirect_chain["chain"][-1].get("url") if redirect_chain["chain"] else raw_domain
+        parsed = urlparse(final_url)
+        if not parsed.netloc:
+            parsed = urlparse("https://" + final_url)
+        domain = parsed.netloc.split(":")[0]
+        try:
+            ipaddress.ip_address(domain)
+            is_ip = True
+        except ValueError:
+            pass
+            
+    # We still check length of finalized domain
     if not domain or len(domain) < 3:
-        return jsonify({"error": "Please provide a valid domain name"}), 400
+        return jsonify({"error": "Failed to resolve a valid target from input"}), 400
 
     print(f"[*] HostTrace AI v4.0 — Starting analysis: {domain}")
 
@@ -720,17 +785,17 @@ def analyze_domain():
     print("  [2/14] WHOIS lookup...")
     whois_info = get_whois_info(domain)
 
-    # ── Step 3: Proxy / CDN Detection ────────────────────────
-    print("  [3/14] Proxy/CDN detection...")
-    proxy_info = detect_proxy(dns_info, whois_info)
+    # ── Step 3: HTTP Headers (Moved up for Proxy Detection) ──
+    print("  [3/14] HTTP header analysis...")
+    http_info = analyze_http_headers(domain)
 
     # ── Step 4: SSL/TLS ──────────────────────────────────────
     print("  [4/14] SSL/TLS analysis...")
     ssl_info = analyze_ssl(domain)
 
-    # ── Step 5: HTTP Headers ─────────────────────────────────
-    print("  [5/14] HTTP header analysis...")
-    http_info = analyze_http_headers(domain)
+    # ── Step 5: Proxy / CDN Detection ────────────────────────
+    print("  [5/14] Proxy/CDN detection...")
+    proxy_info = detect_proxy(dns_info, whois_info, http_info)
 
     # ── Step 6: Geo-IP ───────────────────────────────────────
     print("  [6/14] Geo-IP analysis...")
@@ -752,7 +817,7 @@ def analyze_domain():
 
     # ── Step 10: Redirect Chain ──────────────────────────────
     print("  [10/14] Redirect chain analysis...")
-    redirect_chain = analyze_redirect_chain(domain)
+    # Already computed during canonicalization!
 
     # ── Step 11: OSINT Simulation ────────────────────────────
     print("  [11/14] OSINT simulation...")
@@ -805,6 +870,16 @@ def analyze_domain():
         proxy_info, whois_info, origin_discovery, asn_analysis,
         redirect_chain, geo_info, url_analysis, ssl_info, risk, domain,
     )
+
+    risk_reason = generate_risk_explanation(
+        domain=domain,
+        risk_score=risk.get("risk_score", 0),
+        prediction=risk.get("ml_prediction", {}).get("label", "Unknown"),
+        flags=risk.get("risk_factors", []),
+        features=risk.get("ml_features", {}),
+    )
+
+
     infra_map        = build_infrastructure_map(proxy_info, origin_discovery, asn_analysis)
 
     # ── v8.0 Advanced Profiling & Simulation ────────────
@@ -843,12 +918,16 @@ def analyze_domain():
         "ip_addresses":    dns_info["ip_addresses"],
         "ttl_hint":        dns_info.get("ttl_hint", "Unknown"),
         # ── Proxy ──────────────────────────────────────────
-        "proxy_detected":  proxy_info["proxy_detected"],
-        "proxy_provider":  proxy_info["proxy_provider"],
-        "cdn_detected":    proxy_info["cdn_detected"],
-        "cdn_provider":    proxy_info["cdn_provider"],
-        "masking_level":   proxy_info["masking_level"],
-        "waf_suspected":   proxy_info["waf_suspected"],
+        "proxy_detected":  proxy_info.get("proxy_detected", False),
+        "proxy_provider":  proxy_info.get("proxy_provider", None),
+        "cdn_detected":    proxy_info.get("cdn_detected", False),
+        "cdn_provider":    proxy_info.get("cdn_provider", None),
+        "origin_hidden":   proxy_info.get("origin_hidden", False),
+        "proxy_indicators": proxy_info.get("proxy_indicators", []),
+        "leak_signals":    origin_discovery.get("leak_signals", []),
+        "asn_mismatch":    asn_analysis.get("mismatch_detected", False),
+        "masking_level":   proxy_info.get("masking_level", "None"),
+        "waf_suspected":   proxy_info.get("waf_suspected", False),
         # ── Hosting ────────────────────────────────────────
         "real_hosting":    hosting["real_hosting"],
         "possible_hosting":hosting.get("possible_hosting"),
@@ -868,6 +947,7 @@ def analyze_domain():
         "osint_simulation":   osint_sim,
         "ai_confidence":      ai_confidence,
         "why_risky":          why_risky,
+        "risk_reason":        risk_reason,
         "infrastructure_map": infra_map,
         # ── Existing detailed modules ────────────────────
         "whois": {
@@ -904,7 +984,7 @@ def analyze_domain():
         "threat_region":         threat_region
     }
     
-    SCAN_CACHE[domain] = {'time': time.time(), 'response': response}
+    SCAN_CACHE[raw_domain] = {'time': time.time(), 'response': response}
     
     # Trigger ML Append & Train on success
     try:
@@ -922,13 +1002,37 @@ def analyze_domain():
 
     return jsonify(response)
 
+@app.route("/report-text", methods=["POST"])
+def report_text():
+    """
+    Returns a structured Markdown/text report as plain text.
+    This is the canonical, copyable, backend-ready content that the
+    PDF renderer also uses internally.
+    """
+    data = request.get_json(silent=True) or {}
+    if not data:
+        return jsonify({"error": "No scan data provided"}), 400
+    try:
+        text = generate_text_report(data)
+        return text, 200, {
+            "Content-Type":        "text/plain; charset=utf-8",
+            "Content-Disposition": f"inline; filename=HostTrace_Report_{data.get('domain','scan')}.md",
+        }
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/download-pdf", methods=["POST"])
 def download_pdf():
+    """
+    Generates the structured text report first, then renders it to PDF.
+    The text report is also embedded in the response headers so the
+    frontend can preview it without a second round-trip.
+    """
     data = request.get_json(silent=True) or {}
     domain = data.get("domain", "unknown_domain")
     if not data:
         return jsonify({"error": "No data provided"}), 400
-    
     try:
         from io import BytesIO
         pdf_bytes = generate_pdf_report(data)
@@ -941,6 +1045,128 @@ def download_pdf():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/download-word", methods=["POST"])
+def download_word():
+    """
+    Generates a styled Word (.docx) forensic report and serves it as a download.
+    """
+    data = request.get_json(silent=True) or {}
+    domain = data.get("domain", "unknown_domain")
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    try:
+        from io import BytesIO
+        docx_bytes = generate_word_report(data)
+        buffer = BytesIO(docx_bytes)
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=f"HostTrace_Report_{domain}.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/resolve-ip", methods=["GET"])
+def resolve_ip():
+    ip = request.args.get("ip", "").strip()
+    if not ip:
+        return jsonify({"error": "No IP provided"}), 400
+        
+    resolved_domain = None
+    resolution_method = "NONE"
+    
+    # ── Step 1: Check CDN / Shared Infra ──
+    try:
+        from utils.constants import CLOUDFLARE_RANGES, AWS_RANGES, GCP_RANGES, AZURE_RANGES, AKAMAI_RANGES, FASTLY_RANGES
+        from utils.proxy import ip_in_cidr
+        
+        is_cdn = False
+        if any(ip_in_cidr(ip, r) for r in CLOUDFLARE_RANGES): is_cdn = True
+        elif any(ip_in_cidr(ip, r) for r in AWS_RANGES): is_cdn = True
+        elif any(ip_in_cidr(ip, r) for r in FASTLY_RANGES): is_cdn = True
+        elif any(ip_in_cidr(ip, r) for r in AKAMAI_RANGES): is_cdn = True
+        
+        if is_cdn:
+            return jsonify({
+                "ip": ip,
+                "resolved_domain": "",
+                "resolution_method": "CDN",
+                "redirect_url": "",
+                "status": "PARTIAL",
+                "note": "IP may be part of shared CDN infrastructure",
+                "shared_infrastructure": True
+            })
+    except Exception:
+        pass
+        
+    # ── Step 2: PTR Lookup ──
+    if not resolved_domain:
+        try:
+            ptr_domain, _, _ = socket.gethostbyaddr(ip)
+            if ptr_domain and not ptr_domain.endswith('.arpa') and "in-addr" not in ptr_domain:
+                resolved_domain = ptr_domain
+                resolution_method = "PTR"
+        except Exception:
+            pass
+            
+    # ── Step 3: HTTP Probe ──
+    if not resolved_domain:
+        import urllib.request
+        from urllib.parse import urlparse
+        import ssl
+        
+        # http probe
+        try:
+            req = urllib.request.Request(f"http://{ip}", headers={"User-Agent": "HostTraceAI"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                final_url = resp.geturl()
+                parsed = urlparse(final_url)
+                if parsed.netloc and parsed.netloc != ip and not parsed.netloc.startswith(ip + ":"):
+                    resolved_domain = parsed.netloc.split(":")[0]
+                    resolution_method = "HTTP"
+        except Exception:
+            pass
+
+        # https probe
+        if not resolved_domain:
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(f"https://{ip}", headers={"User-Agent": "HostTraceAI"})
+                with urllib.request.urlopen(req, timeout=3, context=ctx) as resp:
+                    final_url = resp.geturl()
+                    parsed = urlparse(final_url)
+                    if parsed.netloc and parsed.netloc != ip and not parsed.netloc.startswith(ip + ":"):
+                        resolved_domain = parsed.netloc.split(":")[0]
+                        resolution_method = "HTTP"
+            except Exception:
+                pass
+                
+    if resolved_domain:
+        return jsonify({
+            "ip": ip,
+            "resolved_domain": resolved_domain,
+            "resolution_method": resolution_method,
+            "redirect_url": f"https://{resolved_domain}",
+            "status": "SUCCESS",
+            "note": "Domain resolved via active probe or DNS"
+        })
+    else:
+        return jsonify({
+            "ip": ip,
+            "resolved_domain": "",
+            "resolution_method": "NONE",
+            "redirect_url": "",
+            "status": "FAILED",
+            "note": "No direct website mapping found for this IP"
+        })
 
 
 if __name__ == "__main__":

@@ -61,6 +61,7 @@ def discover_origin_infrastructure(domain: str, proxy_ips: list) -> dict:
     """
     possible_origin_ips: list = []
     subdomain_leaks:     list = []
+    leak_signals:        list = []
     checked:             int  = 0
 
     PROXY_RANGES = CLOUDFLARE_RANGES + AKAMAI_RANGES + FASTLY_RANGES
@@ -79,6 +80,7 @@ def discover_origin_infrastructure(domain: str, proxy_ips: list) -> dict:
                         "is_proxy":  False,
                         "note":      "⚠ Possible origin IP — NOT behind proxy",
                     })
+                    leak_signals.append(f"Subdomain {fqdn} exposes IP {ip}")
                     if ip not in possible_origin_ips:
                         possible_origin_ips.append(ip)
                 else:
@@ -96,10 +98,14 @@ def discover_origin_infrastructure(domain: str, proxy_ips: list) -> dict:
     n = len(possible_origin_ips)
     confidence = "High" if n >= 2 else ("Medium" if n == 1 else "Low")
 
+    if n == 0:
+        leak_signals.append("Origin IP not publicly exposed due to CDN/Proxy protection")
+
     return {
         "possible_origin_ips": possible_origin_ips,
         "confidence":          confidence,
         "subdomain_leaks":     subdomain_leaks[:12],
+        "leak_signals":        leak_signals,
         "origin_suspected":    n > 0,
         "subdomains_checked":  checked,
     }
@@ -152,7 +158,7 @@ def analyze_asn_mismatch(proxy_info: dict, origin_discovery: dict) -> dict:
 # ══════════════════════════════════════════════════════════════
 # PROXY / CDN DETECTION  (preserved from v3.0, enhanced)
 # ══════════════════════════════════════════════════════════════
-def detect_proxy(dns_info: dict, whois_info: dict) -> dict:
+def detect_proxy(dns_info: dict, whois_info: dict, http_info: dict = None) -> dict:
     """Full proxy/CDN detection using CIDR, NS, and domain pattern checks."""
     result = {
         "proxy_detected":    False,
@@ -162,6 +168,8 @@ def detect_proxy(dns_info: dict, whois_info: dict) -> dict:
         "detection_method":  [],
         "masking_level":     "None",
         "waf_suspected":     False,
+        "origin_hidden":     False,
+        "proxy_indicators":  [],
     }
     ips    = dns_info.get("ip_addresses", [])
     nss    = [n.lower() for n in whois_info.get("name_servers", [])]
@@ -224,6 +232,21 @@ def detect_proxy(dns_info: dict, whois_info: dict) -> dict:
             })
             result["detection_method"].append(
                 "Domain matches known Cloudflare Enterprise customer pattern")
+
+    if http_info and http_info.get("proxy_headers"):
+        ph = http_info.get("proxy_headers")
+        result["proxy_indicators"].extend(ph)
+        if not result["proxy_detected"] and not result["cdn_detected"]:
+            if http_info.get("cdn_via_header"):
+                via_prov = http_info.get("cdn_via_header")
+                result.update({
+                    "cdn_detected": True, "cdn_provider": via_prov,
+                    "masking_level": "MEDIUM — HTTP Proxy/CDN layer active",
+                })
+                result["detection_method"].append(f"HTTP header indicator: {via_prov}")
+
+    if result["proxy_detected"] or result["cdn_detected"]:
+        result["origin_hidden"] = True
 
     if not result["proxy_detected"] and not result["cdn_detected"]:
         result["masking_level"] = "NONE — Direct host exposure"

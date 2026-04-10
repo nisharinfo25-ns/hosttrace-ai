@@ -205,7 +205,7 @@ function renderResults(data) {
   renderVerdictBar(data);
   renderSummaryCards(data);
   renderInfrastructureMap(data.infrastructure_map || []);
-  renderWhyRisky(data.why_risky || []);
+  renderWhyRisky(data);
   renderAiConfidence(data.ai_confidence || {});
   renderConfidenceMeter(data);
   renderRiskGauge(data.risk_score, data.risk_level);
@@ -251,8 +251,9 @@ function renderVerdictBar(data) {
 ═══════════════════════════════════════════ */
 function renderSummaryCards(data) {
   document.getElementById('resDomain').textContent = data.domain;
-  document.getElementById('resIPs').textContent = data.ip_addresses?.length
-    ? data.ip_addresses.join(' · ') : 'Resolution failed';
+  document.getElementById('resIPs').innerHTML = data.ip_addresses?.length
+    ? data.ip_addresses.map(ip => `<a href="#" class="ip-link" style="color:var(--cyan);text-decoration:underline;cursor:pointer;" onclick="resolveIp('${ip}'); return false;">${ip}</a>`).join(' &middot; ') : 'Resolution failed';
+
 
   const proxyVal=document.getElementById('resProxy'), proxySub=document.getElementById('resProxyProvider');
   const proxyIcon=document.getElementById('proxyIcon');
@@ -286,6 +287,27 @@ function renderSummaryCards(data) {
 }
 
 /* ════════════════════════════════════════════
+   IP RESOLUTION FLOW (NEW)
+═══════════════════════════════════════════ */
+async function resolveIp(ip) {
+  try {
+    const res = await fetch(`${API_BASE}/resolve-ip?ip=${encodeURIComponent(ip)}`);
+    const data = await res.json();
+    
+    if (data.status === 'SUCCESS' && data.redirect_url) {
+      window.open(data.redirect_url, '_blank');
+    } else if (data.status === 'PARTIAL' && data.shared_infrastructure) {
+      alert(`[SHARED INFRASTRUCTURE PROTECTED]\n\nIP: ${data.ip}\nResolution Method: ${data.resolution_method}\nNote: ${data.note}\n\nCannot redirect directly using IP. Please perform domain-level navigation.`);
+    } else {
+      alert(`[NO DOMAIN DIRECTLY FOUND]\n\nIP: ${data.ip}\nStatus: ${data.status}\nNote: ${data.note}`);
+    }
+  } catch (e) {
+    alert("Error communicating with resolution backend: " + e.message);
+  }
+}
+
+
+/* ════════════════════════════════════════════
    INFRASTRUCTURE MAP  (NEW 🔥)
 ═══════════════════════════════════════════ */
 function renderInfrastructureMap(nodes) {
@@ -315,21 +337,59 @@ function renderInfrastructureMap(nodes) {
 }
 
 /* ════════════════════════════════════════════
-   WHY RISKY  (NEW — Explainable Output)
+   WHY RISKY  (Gemini AI — Explainable Output)
 ═══════════════════════════════════════════ */
-function renderWhyRisky(reasons) {
-  const grid = document.getElementById('whyRiskyGrid');
-  if (!reasons.length) { grid.innerHTML='<div class="why-empty">✅ No risk factors identified</div>'; return; }
-  grid.innerHTML = reasons.map(r => {
-    const icon = r.split(' ')[0];
-    const text = r.slice(icon.length+1);
-    const isGood = r.includes('✅');
-    return `<div class="why-item ${isGood?'why-good':''}">
-      <span class="why-icon">${icon}</span>
-      <span class="why-text">${escapeHtml(text)}</span>
-    </div>`;
-  }).join('');
+function renderWhyRisky(data) {
+  const p = document.getElementById('riskReason');
+  if (!p) return;
+
+  const riskData = data.risk_reason;
+  
+  if (!riskData || !riskData.title || !Array.isArray(riskData.points) || riskData.points.length === 0) {
+    p.innerText = 'No risk factors analyzed yet.';
+    p.style.color = 'var(--cyan)';
+    return;
+  }
+
+  p.innerHTML = '';
+  
+  const title = riskData.title;
+  const pointsList = riskData.points;
+
+  const header = document.createElement('h3');
+  header.innerText = title;
+  header.style.marginBottom = '12px';
+  header.style.fontSize = '1.1em';
+  header.style.fontWeight = 'bold';
+  
+  // Decide color intuitively
+  if (title.toUpperCase().includes('SAFE')) {
+    header.style.color = '#00ff9f'; // Green
+    p.style.color = '#00ff9f';
+  } else {
+    header.style.color = '#ff4f6d'; // Red
+    p.style.color = '#ff4f6d';
+  }
+
+  p.appendChild(header);
+
+  const ul = document.createElement('ul');
+  ul.style.listStyleType = 'disc';
+  ul.style.paddingLeft = '20px';
+  ul.style.marginTop = '10px';
+  ul.style.textAlign = 'left';
+
+  pointsList.forEach(text => {
+    const li = document.createElement('li');
+    li.style.marginBottom = '8px';
+    li.style.lineHeight = '1.4';
+    li.innerText = text;
+    ul.appendChild(li);
+  });
+
+  p.appendChild(ul);
 }
+
 
 /* ════════════════════════════════════════════
    AI CONFIDENCE MODULE  (NEW)
@@ -813,10 +873,15 @@ function renderThreatIntel(t) {
 async function downloadReport() {
   if (!currentReport) { alert('Run a scan first!'); return; }
   try {
+    const payload = {
+      ...currentReport,
+      scan_history: globalScanHistory,
+      input_url: document.getElementById('domainInput').value.trim()
+    };
     const res = await fetch(`${API_BASE}/download-pdf`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(currentReport)
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
         const text = await res.text();
@@ -837,6 +902,116 @@ async function downloadReport() {
     alert('Error generating PDF: ' + err.message);
   }
 }
+
+/* ════════════════════════════════════════════
+   WORD REPORT DOWNLOAD
+═══════════════════════════════════════════ */
+async function downloadWord() {
+  if (!currentReport) { alert('Run a scan first!'); return; }
+  const status = document.getElementById('reportStatusMsg');
+  status.textContent = '⟳ Generating Word document…';
+  try {
+    const payload = {
+      ...currentReport,
+      scan_history: globalScanHistory,
+      input_url: document.getElementById('domainInput').value.trim()
+    };
+    const res = await fetch(`${API_BASE}/download-word`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      status.textContent = '✗ Failed: ' + text;
+      return;
+    }
+    const blob = await res.blob();
+    const url  = window.URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = `HostTrace_Report_${currentReport.domain}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    a.remove();
+    status.textContent = '✔ Word report downloaded!';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  } catch (err) {
+    status.textContent = '✗ Error: ' + err.message;
+  }
+}
+
+/* ════════════════════════════════════════════
+   TEXT REPORT PREVIEW & DOWNLOAD
+═══════════════════════════════════════════ */
+let _cachedTextReport = '';
+
+async function previewReport() {
+  if (!currentReport) { alert('Run a scan first!'); return; }
+  const btn   = document.getElementById('previewReportBtn');
+  const status = document.getElementById('reportStatusMsg');
+  btn.disabled = true;
+  status.textContent = '⟳ Fetching text report…';
+
+  try {
+    const payload = {
+      ...currentReport,
+      scan_history: globalScanHistory,
+      input_url: document.getElementById('domainInput').value.trim()
+    };
+    const res = await fetch(`${API_BASE}/report-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) { throw new Error(`Server ${res.status}`); }
+    const text = await res.text();
+    _cachedTextReport = text;
+
+    document.getElementById('textReportContent').textContent = text;
+    document.getElementById('textReportModal').classList.remove('hidden');
+    status.textContent = '✔ Report ready';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  } catch (err) {
+    status.textContent = '✗ Error: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function closeTextReport() {
+  document.getElementById('textReportModal').classList.add('hidden');
+}
+
+async function copyTextReport() {
+  if (!_cachedTextReport) return;
+  try {
+    await navigator.clipboard.writeText(_cachedTextReport);
+    const btn = document.getElementById('copyReportBtn');
+    btn.textContent = '✔ Copied!';
+    setTimeout(() => { btn.textContent = '⎘ Copy'; }, 2000);
+  } catch { alert('Clipboard copy failed — please select and copy manually.'); }
+}
+
+function downloadTextReport() {
+  if (!_cachedTextReport) return;
+  const blob = new Blob([_cachedTextReport], { type: 'text/markdown;charset=utf-8' });
+  const url  = window.URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `HostTrace_Report_${currentReport?.domain || 'scan'}.md`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  a.remove();
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeTextReport();
+});
 
 /* ════════════════════════════════════════════
    UTILITIES
